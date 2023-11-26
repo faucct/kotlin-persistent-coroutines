@@ -3,22 +3,26 @@ package com.bnorm.template
 import com.bnorm.template.PersistingWrapper.wrapper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
-import kotlinx.serialization.KSerializer
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.descriptors.SerialDescriptor
-import kotlinx.serialization.encoding.Decoder
-import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
 import kotlin.coroutines.coroutineContext
 
-suspend fun foo() {
-  println("hi")
+var persisting = false
+suspend fun persist() {
+  persisting = true
   coroutineContext[Persistor.Key]!!.persist()
+  if (persisting) {
+    throw RuntimeException("")
+  }
+}
+
+suspend fun foo() {
+  val a = 100
+  println("hi")
+  persist()
   bar()
-  println("then")
+  println("then $a")
   delay(1000)
   yield()
   println("later")
@@ -26,7 +30,7 @@ suspend fun foo() {
 
 suspend fun bar() {
   println("bar")
-  coroutineContext[Persistor.Key]!!.persist()
+  persist()
   println("then")
   delay(1000)
   yield()

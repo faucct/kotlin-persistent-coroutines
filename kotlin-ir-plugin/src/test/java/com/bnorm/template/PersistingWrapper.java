@@ -59,6 +59,7 @@ public class PersistingWrapper {
         @Nullable
         @Override
         public Object persist(@NotNull Continuation<? super Unit> $completion) {
+//            Json.Default.encodeToString(ContinuationSerializer.INSTANCE, (Continuation<? super Object>) $completion);
             try {
                 try (Output output = new Output(Files.newOutputStream(OUTPUT_PATH))) {
                     Kryo kryo = getKryo();
@@ -76,8 +77,7 @@ public class PersistingWrapper {
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
-            throw new RuntimeException("persisted");
-//            return Unit.INSTANCE;
+            return Unit.INSTANCE;
         }
     }
 
