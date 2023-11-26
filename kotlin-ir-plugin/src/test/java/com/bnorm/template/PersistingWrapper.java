@@ -11,6 +11,7 @@ import kotlin.jvm.JvmClassMappingKt;
 import kotlin.jvm.functions.Function1;
 import kotlinx.coroutines.CancellableContinuation;
 import kotlinx.coroutines.CancellableContinuationKt;
+import kotlinx.serialization.json.Json;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.objenesis.instantiator.ObjectInstantiator;
@@ -59,7 +60,7 @@ public class PersistingWrapper {
         @Nullable
         @Override
         public Object persist(@NotNull Continuation<? super Unit> $completion) {
-//            Json.Default.encodeToString(ContinuationSerializer.INSTANCE, (Continuation<? super Object>) $completion);
+            System.out.println(Json.Default.encodeToString(ContinuationSerializer.INSTANCE, (Continuation<? super Object>) $completion));
             try {
                 try (Output output = new Output(Files.newOutputStream(OUTPUT_PATH))) {
                     Kryo kryo = getKryo();

@@ -1,6 +1,6 @@
 package com.bnorm.template
 
-import com.bnorm.template.AccountTransfer.persist
+import com.bnorm.template.PersistingWrapper.wrapper
 import javaslang.Tuple3
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -8,24 +8,36 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import java.util.*
 import kotlin.coroutines.Continuation
+import kotlin.coroutines.coroutineContext
 
 object TripBooking {
+  var persisting = false
+  suspend fun persist() {
+    persisting = true
+    coroutineContext[Persistor.Key]!!.persist()
+    if (persisting) {
+      throw RuntimeException("")
+    }
+  }
+
   @JvmStatic
   fun main(args: Array<String>) {
     println(Arrays.toString(TripBooking::class.java.getMethod("bookTrip", String::class.java, Int::class.java, Continuation::class.java).annotations))
-    val bookTrip = ClassLoader.getSystemClassLoader().loadClass("com.bnorm.template.TripBooking\$bookTrip\$1")
-    for (annotation in bookTrip.annotations) {
-      println(annotation)
-    }
-    for (field in bookTrip.declaredFields) {
-      println(field)
-      for (annotation in field.annotations) {
-        println(annotation)
-      }
-    }
+//    val bookTrip = ClassLoader.getSystemClassLoader().loadClass("com.bnorm.template.TripBooking\$bookTrip\$1")
+//    for (annotation in bookTrip.annotations) {
+//      println(annotation)
+//    }
+//    for (field in bookTrip.declaredFields) {
+//      println(field)
+//      for (annotation in field.annotations) {
+//        println(annotation)
+//      }
+//    }
     runBlocking {
-      bookTrip("name")
-      println("done")
+      wrapper {
+        bookTrip("name")
+        println("done")
+      }
     }
   }
 
