@@ -6,3 +6,7 @@ build/
 out/
 .idea/
 *.iml
+
+.DS_Store
+coroutine
+coroutine.tmp

@@ -38,6 +38,54 @@ fun debug() = "Hello, World!"
     )
     assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode)
   }
+
+  @Test
+  fun `IR plugin success2`() {
+    val result = compile(
+      sourceFile = SourceFile.kotlin(
+        "main.kt", """
+  import kotlinx.coroutines.async
+  import kotlinx.coroutines.coroutineScope
+  import kotlinx.coroutines.delay
+  import java.util.*
+  import com.bnorm.template.PersistableContinuation
+  import com.bnorm.template.PersistedField
+  import com.bnorm.template.PersistencePoint
+  import javaslang.Tuple3
+
+  @PersistableContinuation
+  suspend fun bookTrip(@PersistedField name: String) = coroutineScope {
+    @PersistencePoint val _a = delay(0)
+    @PersistedField val carReservationID = Random().nextInt()
+//    @PersistencePoint val _10 = persist()
+//    rollbackIfThrows({ println("undoing carReservationID") }) {
+//      @PersistedField val hotelReservationID = Random().nextInt()
+//      @PersistencePoint val _20 = persist()
+//      rollbackIfThrows({ println("undoing hotelReservationID") }) {
+//        @PersistedField val flightReservationID = Random().nextInt()
+//        @PersistencePoint val _30 = persist()
+////        Tuple3(carReservationID, hotelReservationID, flightReservationID)
+//      }
+//    }
+  }
+
+  inline fun <T> rollbackIfThrows(rollback: () -> Unit, throwing: () -> T): T {
+    try {
+      return throwing()
+    } catch (suppressing: Throwable) {
+      try {
+        rollback()
+      } catch (suppressed: Throwable) {
+        suppressing.addSuppressed(suppressed)
+      }
+      throw suppressing
+    }
+  }
+"""
+      )
+    )
+    assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode)
+  }
 }
 
 fun compile(
