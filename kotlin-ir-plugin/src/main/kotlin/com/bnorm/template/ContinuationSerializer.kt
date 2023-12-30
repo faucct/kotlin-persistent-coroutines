@@ -12,6 +12,7 @@ import kotlinx.serialization.encoding.*
 import kotlinx.serialization.internal.IntSerializer
 import kotlinx.serialization.internal.PrimitiveSerialDescriptor
 import kotlinx.serialization.internal.StringSerializer
+import kotlinx.serialization.serializer
 import org.jetbrains.kotlin.utils.addToStdlib.cast
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.jvm.internal.BaseContinuationImpl
@@ -47,8 +48,13 @@ class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KS
           debugMetadata.indexToLabel.zip(debugMetadata.localNames.zip(debugMetadata.spilled)) { spilledLabel, (localName, spilled) ->
             if (spilledLabel + 1 == label) {
               assert(decodeStringElement(descriptor, decodeElementIndex(descriptor)) == localName)
-              clazz.getDeclaredField(spilled).set(
-                delegate, decodeStringElement(descriptor, decodeElementIndex(descriptor)).toInt()
+              val field = clazz.getDeclaredField(spilled)
+              field.set(
+                delegate, decodeSerializableElement(
+                  descriptor,
+                  decodeElementIndex(descriptor),
+                  serializersModule.serializer(field.type),
+                )
               )
             }
           }
@@ -85,7 +91,12 @@ class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KS
             if (spilledLabel + 1 == label) {
               encodeStringElement(descriptor, index++, localName)
               val field = continuation.javaClass.getDeclaredField(spilled)
-              encodeStringElement(descriptor, index++, field.get(continuation).toString())
+              encodeSerializableElement(
+                descriptor,
+                index++,
+                serializersModule.serializer(field.type),
+                field.get(continuation)
+              )
             }
           }
         }
