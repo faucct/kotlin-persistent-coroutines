@@ -8,23 +8,54 @@ import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.descriptors.SerialKind
 import kotlinx.serialization.descriptors.buildSerialDescriptor
-import kotlinx.serialization.encoding.Decoder
-import kotlinx.serialization.encoding.Encoder
-import kotlinx.serialization.encoding.encodeStructure
+import kotlinx.serialization.encoding.*
+import kotlinx.serialization.internal.IntSerializer
 import kotlinx.serialization.internal.PrimitiveSerialDescriptor
+import kotlinx.serialization.internal.StringSerializer
+import org.jetbrains.kotlin.utils.addToStdlib.cast
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.jvm.internal.BaseContinuationImpl
 import kotlin.coroutines.jvm.internal.DebugMetadata
 
 @OptIn(InternalSerializationApi::class)
-object ContinuationSerializer : KSerializer<Continuation<Any?>> {
+class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KSerializer<Continuation<Any?>> {
   override val descriptor: SerialDescriptor
     get() = buildSerialDescriptor("com.bnorm.template.ContinuationSerializer", SerialKind.CONTEXTUAL) {
     }
 
-
   override fun deserialize(decoder: Decoder): Continuation<Any?> {
-    TODO("Not yet implemented")
+    val descriptor =
+      buildSerialDescriptor(Continuation::class.java.typeName, kotlinx.serialization.descriptors.StructureKind.MAP) {
+        element("type", PrimitiveSerialDescriptor("type", PrimitiveKind.STRING))
+      }
+    return decoder.decodeStructure(
+      buildSerialDescriptor(Continuation::class.java.typeName, kotlinx.serialization.descriptors.StructureKind.LIST) {
+        element("type", descriptor)
+      },
+    ) {
+      var delegate = rootContinuation
+      while (decodeElementIndex(descriptor) != CompositeDecoder.DECODE_DONE) {
+        decodeInlineElement(descriptor, 0).decodeStructure(descriptor) {
+          assert(decodeSerializableElement(descriptor, decodeElementIndex(descriptor), StringSerializer) == "type")
+          val type = decodeSerializableElement(descriptor, decodeElementIndex(descriptor), StringSerializer)
+          val clazz = ClassLoader.getSystemClassLoader().loadClass(type)
+          delegate = clazz.getDeclaredConstructor(Continuation::class.java).newInstance(delegate).cast()
+          val debugMetadata = clazz.getAnnotation(DebugMetadata::class.java)
+          assert(decodeStringElement(descriptor, decodeElementIndex(descriptor)) == "label")
+          val label = decodeSerializableElement(descriptor, decodeElementIndex(descriptor), IntSerializer)
+          clazz.getDeclaredField("label").set(delegate, label)
+          debugMetadata.indexToLabel.zip(debugMetadata.localNames.zip(debugMetadata.spilled)) { spilledLabel, (localName, spilled) ->
+            if (spilledLabel + 1 == label) {
+              assert(decodeStringElement(descriptor, decodeElementIndex(descriptor)) == localName)
+              clazz.getDeclaredField(spilled).set(
+                delegate, decodeStringElement(descriptor, decodeElementIndex(descriptor)).toInt()
+              )
+            }
+          }
+        }
+      }
+      delegate.cast()
+    }
   }
 
   override fun serialize(encoder: Encoder, value: Continuation<Any?>) {
@@ -38,14 +69,12 @@ object ContinuationSerializer : KSerializer<Continuation<Any?>> {
       },
     ) {
       fun rec(continuation: Continuation<Any?>) {
-        val debugMetadata: DebugMetadata? = continuation.javaClass.getAnnotation(DebugMetadata::class.java)
-        if (debugMetadata === null) {
+        if (continuation == rootContinuation) {
           return
         }
+        val debugMetadata = continuation.javaClass.getAnnotation(DebugMetadata::class.java)!!
         rec((continuation as BaseContinuationImpl).completion!!)
-        val labelField = continuation.javaClass.getDeclaredField("label")
-        labelField.set(continuation, labelField.getInt(continuation))
-        val label = labelField.getInt(continuation)
+        val label = continuation.javaClass.getDeclaredField("label").getInt(continuation)
         encodeInlineElement(descriptor, 0).encodeStructure(descriptor) {
           var index = 0
           encodeStringElement(descriptor, index++, "type")
@@ -56,7 +85,6 @@ object ContinuationSerializer : KSerializer<Continuation<Any?>> {
             if (spilledLabel + 1 == label) {
               encodeStringElement(descriptor, index++, localName)
               val field = continuation.javaClass.getDeclaredField(spilled)
-              field.set(continuation, field.get(continuation))
               encodeStringElement(descriptor, index++, field.get(continuation).toString())
             }
           }

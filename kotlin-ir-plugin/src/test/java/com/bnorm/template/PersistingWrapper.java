@@ -1,28 +1,19 @@
 package com.bnorm.template;
 
-import com.esotericsoftware.kryo.Kryo;
-import com.esotericsoftware.kryo.io.Input;
-import com.esotericsoftware.kryo.io.Output;
-import com.esotericsoftware.kryo.util.DefaultInstantiatorStrategy;
 import kotlin.Unit;
 import kotlin.coroutines.Continuation;
 import kotlin.coroutines.CoroutineContext;
-import kotlin.jvm.JvmClassMappingKt;
 import kotlin.jvm.functions.Function1;
 import kotlinx.coroutines.CancellableContinuation;
 import kotlinx.coroutines.CancellableContinuationKt;
 import kotlinx.serialization.json.Json;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.objenesis.instantiator.ObjectInstantiator;
 
 import java.io.IOException;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class PersistingWrapper {
@@ -60,19 +51,12 @@ public class PersistingWrapper {
         @Nullable
         @Override
         public Object persist(@NotNull Continuation<? super Unit> $completion) {
-            System.out.println(Json.Default.encodeToString(ContinuationSerializer.INSTANCE, (Continuation<? super Object>) $completion));
             try {
-                try (Output output = new Output(Files.newOutputStream(OUTPUT_PATH))) {
-                    Kryo kryo = getKryo();
-                    persistedContinuation.continuation.getContext().fold(null, (__, element) -> {
-                        kryo.writeClassAndObject(output, element.getKey());
-                        kryo.getReferenceResolver().addWrittenObject(element);
-                        return null;
-                    });
-                    kryo.writeClassAndObject(output, null);
-                    kryo.getReferenceResolver().addWrittenObject(persistedContinuation.getContext());
-                    kryo.getReferenceResolver().addWrittenObject(persistedContinuation);
-                    kryo.writeClassAndObject(output, $completion);
+                try (var output = Files.newOutputStream(OUTPUT_PATH)) {
+                    output.write(Json.Default.encodeToString(
+                            new ContinuationSerializer(persistedContinuation),
+                            (Continuation<? super Object>) $completion
+                    ).getBytes());
                 }
                 Files.move(OUTPUT_PATH, STATE_PATH, StandardCopyOption.ATOMIC_MOVE);
             } catch (IOException e) {
@@ -89,27 +73,17 @@ public class PersistingWrapper {
         ) {
             PersistedContinuation<T> persistedContinuation = new PersistedContinuation<>(continuation);
             if (Files.exists(STATE_PATH)) {
-                try (var input = new Input(Files.newInputStream(STATE_PATH))) {
-                    Kryo kryo = getKryo();
-                    while (true) {
-                        CoroutineContext.Key<?> key = (CoroutineContext.Key<?>) kryo.readClassAndObject(input);
-                        if (key == null) {
-                            break;
-                        }
-                        kryo.getReferenceResolver().setReadObject(kryo.getReferenceResolver().nextReadId(null), Objects.requireNonNull(
-                                persistedContinuation.continuation.getContext().get(key),
-                                key.toString()
-                        ));
-                    }
-                    var referenceResolver = kryo.getReferenceResolver();
-
-                    referenceResolver.setReadObject(referenceResolver.nextReadId(null), persistedContinuation.getContext());
-                    referenceResolver.setReadObject(referenceResolver.nextReadId(null), persistedContinuation);
+                try (var input = Files.newInputStream(STATE_PATH)) {
                     var cancellableContinuationReference = new AtomicReference<CancellableContinuation<? super Unit>>();
-                    Object coroutineSuspended = CancellableContinuationKt.suspendCancellableCoroutine(cancellableContinuation -> {
-                        cancellableContinuationReference.set(cancellableContinuation);
-                        return Unit.INSTANCE;
-                    }, (Continuation<Unit>) kryo.readClassAndObject(input));
+                    Object coroutineSuspended = CancellableContinuationKt.suspendCancellableCoroutine(
+                            cancellableContinuation -> {
+                                cancellableContinuationReference.set(cancellableContinuation);
+                                return Unit.INSTANCE;
+                            },
+                            (Continuation<Unit>) (Continuation<?>) Json.Default.decodeFromString(
+                                    new ContinuationSerializer(persistedContinuation), new String(input.readAllBytes())
+                            )
+                    );
                     cancellableContinuationReference.get().resume(Unit.INSTANCE, null);
                     return coroutineSuspended;
                 } catch (IOException e) {
@@ -119,39 +93,4 @@ public class PersistingWrapper {
             return function1.invoke(persistedContinuation);
         }
     };
-
-    @NotNull
-    private static Kryo getKryo() {
-        Kryo kryo = new Kryo();
-        kryo.setAutoReset(false);
-        kryo.setRegistrationRequired(false);
-        kryo.setReferences(true);
-        kryo.setInstantiatorStrategy(new DefaultInstantiatorStrategy() {
-            @Override
-            public ObjectInstantiator<?> newInstantiatorOf(Class type) {
-                Class<?> klass = type;
-                var kotlinClass = JvmClassMappingKt.getKotlinClass(klass);
-                try {
-                    Object objectInstance = kotlinClass.getObjectInstance();
-                    if (objectInstance != null) {
-                        return () -> objectInstance;
-                    }
-                } catch (UnsupportedOperationException ignored) {
-                }
-                try {
-                    Constructor<?> constructor = klass.getDeclaredConstructor(Continuation.class);
-                    return () -> {
-                        try {
-                            return constructor.newInstance((Continuation<?>) null);
-                        } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
-                            throw new RuntimeException(e);
-                        }
-                    };
-                } catch (NoSuchMethodException ignored) {
-                }
-                return super.newInstantiatorOf(type);
-            }
-        });
-        return kryo;
-    }
 }
