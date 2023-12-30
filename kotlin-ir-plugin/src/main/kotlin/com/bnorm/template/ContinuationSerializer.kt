@@ -20,6 +20,18 @@ import kotlin.coroutines.jvm.internal.DebugMetadata
 
 @OptIn(InternalSerializationApi::class)
 class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KSerializer<Continuation<Any?>> {
+  private fun forEachSpilledLocalNameAndField(
+    debugMetadata: DebugMetadata, label: Int, closure: (String, String) -> Unit,
+  ) {
+    debugMetadata.indexToLabel.zip(
+      debugMetadata.localNames.zip(debugMetadata.spilled),
+    ) { spilledLabel, (localName, spilled) ->
+      if (spilledLabel + 1 == label) {
+        closure(localName, spilled)
+      }
+    }
+  }
+
   override val descriptor: SerialDescriptor
     get() = buildSerialDescriptor("com.bnorm.template.ContinuationSerializer", SerialKind.CONTEXTUAL) {
     }
@@ -45,18 +57,16 @@ class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KS
           assert(decodeStringElement(descriptor, decodeElementIndex(descriptor)) == "label")
           val label = decodeSerializableElement(descriptor, decodeElementIndex(descriptor), IntSerializer)
           clazz.getDeclaredField("label").set(delegate, label)
-          debugMetadata.indexToLabel.zip(debugMetadata.localNames.zip(debugMetadata.spilled)) { spilledLabel, (localName, spilled) ->
-            if (spilledLabel + 1 == label) {
-              assert(decodeStringElement(descriptor, decodeElementIndex(descriptor)) == localName)
-              val field = clazz.getDeclaredField(spilled)
-              field.set(
-                delegate, decodeSerializableElement(
-                  descriptor,
-                  decodeElementIndex(descriptor),
-                  serializersModule.serializer(field.type),
-                )
+          forEachSpilledLocalNameAndField(debugMetadata, label) { localName, spilled ->
+            assert(decodeStringElement(descriptor, decodeElementIndex(descriptor)) == localName)
+            val field = clazz.getDeclaredField(spilled)
+            field.set(
+              delegate, decodeSerializableElement(
+                descriptor,
+                decodeElementIndex(descriptor),
+                serializersModule.serializer(field.type),
               )
-            }
+            )
           }
         }
       }
@@ -87,17 +97,15 @@ class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KS
           encodeStringElement(descriptor, index++, continuation::class.java.typeName)
           encodeStringElement(descriptor, index++, "label")
           encodeIntElement(descriptor, index++, label)
-          debugMetadata.indexToLabel.zip(debugMetadata.localNames.zip(debugMetadata.spilled)) { spilledLabel, (localName, spilled) ->
-            if (spilledLabel + 1 == label) {
-              encodeStringElement(descriptor, index++, localName)
-              val field = continuation.javaClass.getDeclaredField(spilled)
-              encodeSerializableElement(
-                descriptor,
-                index++,
-                serializersModule.serializer(field.type),
-                field.get(continuation)
-              )
-            }
+          forEachSpilledLocalNameAndField(debugMetadata, label) { localName, spilled ->
+            encodeStringElement(descriptor, index++, localName)
+            val field = continuation.javaClass.getDeclaredField(spilled)
+            encodeSerializableElement(
+              descriptor,
+              index++,
+              serializersModule.serializer(field.type),
+              field.get(continuation)
+            )
           }
         }
       }
