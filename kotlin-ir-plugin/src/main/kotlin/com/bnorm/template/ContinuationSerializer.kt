@@ -20,6 +20,19 @@ import kotlin.coroutines.jvm.internal.DebugMetadata
 
 @OptIn(InternalSerializationApi::class)
 class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KSerializer<Continuation<Any?>> {
+  companion object {
+    val continuationDescriptor = buildSerialDescriptor(
+      Continuation::class.java.typeName, kotlinx.serialization.descriptors.StructureKind.MAP,
+    ) {
+      element("type", PrimitiveSerialDescriptor("type", PrimitiveKind.STRING))
+    }
+    val continuationsDescriptor = buildSerialDescriptor(
+      Continuation::class.java.typeName, kotlinx.serialization.descriptors.StructureKind.LIST
+    ) {
+      element("type", continuationDescriptor)
+    }
+  }
+
   private fun forEachSpilledLocalNameAndField(
     debugMetadata: DebugMetadata, label: Int, closure: (String, String) -> Unit,
   ) {
@@ -37,15 +50,8 @@ class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KS
     }
 
   override fun deserialize(decoder: Decoder): Continuation<Any?> {
-    val descriptor =
-      buildSerialDescriptor(Continuation::class.java.typeName, kotlinx.serialization.descriptors.StructureKind.MAP) {
-        element("type", PrimitiveSerialDescriptor("type", PrimitiveKind.STRING))
-      }
-    return decoder.decodeStructure(
-      buildSerialDescriptor(Continuation::class.java.typeName, kotlinx.serialization.descriptors.StructureKind.LIST) {
-        element("type", descriptor)
-      },
-    ) {
+    val descriptor = continuationDescriptor
+    return decoder.decodeStructure(continuationsDescriptor) {
       var delegate = rootContinuation
       while (decodeElementIndex(descriptor) != CompositeDecoder.DECODE_DONE) {
         decodeInlineElement(descriptor, 0).decodeStructure(descriptor) {
@@ -75,15 +81,8 @@ class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KS
   }
 
   override fun serialize(encoder: Encoder, value: Continuation<Any?>) {
-    val descriptor =
-      buildSerialDescriptor(value::class.java.typeName, kotlinx.serialization.descriptors.StructureKind.MAP) {
-        element("type", PrimitiveSerialDescriptor("type", PrimitiveKind.STRING))
-      }
-    encoder.encodeStructure(
-      buildSerialDescriptor(value::class.java.typeName, kotlinx.serialization.descriptors.StructureKind.LIST) {
-        element("type", descriptor)
-      },
-    ) {
+    val descriptor = continuationDescriptor
+    encoder.encodeStructure(continuationsDescriptor) {
       fun rec(continuation: Continuation<Any?>) {
         if (continuation == rootContinuation) {
           return
