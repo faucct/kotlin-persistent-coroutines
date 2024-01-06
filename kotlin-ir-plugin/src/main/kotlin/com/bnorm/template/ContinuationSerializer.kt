@@ -3,6 +3,7 @@
 package com.bnorm.template
 
 import kotlinx.serialization.InternalSerializationApi
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.SerialDescriptor
@@ -18,7 +19,7 @@ import kotlin.coroutines.Continuation
 import kotlin.coroutines.jvm.internal.BaseContinuationImpl
 import kotlin.coroutines.jvm.internal.DebugMetadata
 
-@OptIn(InternalSerializationApi::class)
+@OptIn(ExperimentalSerializationApi::class, InternalSerializationApi::class)
 class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KSerializer<Continuation<Any?>> {
   companion object {
     val continuationDescriptor = buildSerialDescriptor(
@@ -58,20 +59,34 @@ class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KS
           assert(decodeSerializableElement(descriptor, decodeElementIndex(descriptor), StringSerializer) == "type")
           val type = decodeSerializableElement(descriptor, decodeElementIndex(descriptor), StringSerializer)
           val clazz = ClassLoader.getSystemClassLoader().loadClass(type)
-          delegate = clazz.getDeclaredConstructor(Continuation::class.java).newInstance(delegate).cast()
+          val constructor = clazz.declaredConstructors.single()
+          delegate = constructor.newInstance(*(constructor.parameters.dropLast(1).map { parameter ->
+            val serializer = serializersModule.serializer(parameter.type)
+            if (serializer is SingletonKSerializer) {
+              serializer.t
+            } else {
+              decodeSerializableElement(descriptor, decodeElementIndex(descriptor), serializer)
+            }
+          } + listOf(delegate)).toTypedArray()).cast()
           val debugMetadata = clazz.getAnnotation(DebugMetadata::class.java)
           assert(decodeStringElement(descriptor, decodeElementIndex(descriptor)) == "label")
           val label = decodeSerializableElement(descriptor, decodeElementIndex(descriptor), IntSerializer)
           clazz.getDeclaredField("label").set(delegate, label)
           forEachSpilledLocalNameAndField(debugMetadata, label) { localName, spilled ->
-            assert(decodeStringElement(descriptor, decodeElementIndex(descriptor)) == localName)
             val field = clazz.getDeclaredField(spilled)
+            val serializer = serializersModule.serializer(
+              if (localName == "this")
+                ClassLoader.getSystemClassLoader().loadClass(debugMetadata.className)
+              else
+                field.type
+            )
             field.set(
-              delegate, decodeSerializableElement(
-                descriptor,
-                decodeElementIndex(descriptor),
-                serializersModule.serializer(field.type),
-              )
+              delegate, if (serializer is SingletonKSerializer) {
+                serializer.t
+              } else {
+                assert(decodeStringElement(descriptor, decodeElementIndex(descriptor)) == localName)
+                decodeSerializableElement(descriptor, decodeElementIndex(descriptor), serializer)
+              }
             )
           }
         }
@@ -97,14 +112,22 @@ class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KS
           encodeStringElement(descriptor, index++, "label")
           encodeIntElement(descriptor, index++, label)
           forEachSpilledLocalNameAndField(debugMetadata, label) { localName, spilled ->
-            encodeStringElement(descriptor, index++, localName)
             val field = continuation.javaClass.getDeclaredField(spilled)
-            encodeSerializableElement(
-              descriptor,
-              index++,
-              serializersModule.serializer(field.type),
-              field.get(continuation)
+            val serializer = serializersModule.serializer(
+              if (localName == "this")
+                ClassLoader.getSystemClassLoader().loadClass(debugMetadata.className)
+              else
+                field.type
             )
+            if (serializer !is SingletonKSerializer) {
+              encodeStringElement(descriptor, index++, localName)
+              encodeSerializableElement(
+                descriptor,
+                index++,
+                serializer,
+                field.get(continuation)
+              )
+            }
           }
         }
       }

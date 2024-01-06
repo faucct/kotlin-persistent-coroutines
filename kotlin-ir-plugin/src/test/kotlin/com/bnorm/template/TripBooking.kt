@@ -6,6 +6,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import java.util.*
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.coroutineContext
@@ -34,7 +35,7 @@ object TripBooking {
 //      }
 //    }
     runBlocking {
-      wrapper {
+      (wrapper(Json.Default)) {
         bookTrip("name")
         println("done")
       }

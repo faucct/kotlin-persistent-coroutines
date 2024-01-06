@@ -6,7 +6,7 @@ import kotlin.coroutines.CoroutineContext;
 import kotlin.jvm.functions.Function1;
 import kotlinx.coroutines.CancellableContinuation;
 import kotlinx.coroutines.CancellableContinuationKt;
-import kotlinx.serialization.json.Json;
+import kotlinx.serialization.StringFormat;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -24,9 +24,9 @@ public class PersistingWrapper {
         private final Continuation<? super T> continuation;
         private final CoroutineContext coroutineContext;
 
-        private PersistedContinuation(Continuation<? super T> continuation) {
+        private PersistedContinuation(StringFormat stringFormat, Continuation<? super T> continuation) {
             this.continuation = continuation;
-            coroutineContext = new PersistingCoroutineContext<>(this).plus(continuation.getContext());
+            coroutineContext = new PersistingCoroutineContext<>(stringFormat, this).plus(continuation.getContext());
         }
 
         @NotNull
@@ -42,9 +42,11 @@ public class PersistingWrapper {
     }
 
     public static class PersistingCoroutineContext<T> extends Persistor {
+        private final StringFormat stringFormat;
         private final PersistedContinuation<T> persistedContinuation;
 
-        public PersistingCoroutineContext(PersistedContinuation<T> persistedContinuation) {
+        public PersistingCoroutineContext(StringFormat stringFormat, PersistedContinuation<T> persistedContinuation) {
+            this.stringFormat = stringFormat;
             this.persistedContinuation = persistedContinuation;
         }
 
@@ -53,7 +55,7 @@ public class PersistingWrapper {
         public Object persist(@NotNull Continuation<? super Unit> $completion) {
             try {
                 try (var output = Files.newOutputStream(OUTPUT_PATH)) {
-                    output.write(Json.Default.encodeToString(
+                    output.write(stringFormat.encodeToString(
                             new ContinuationSerializer(persistedContinuation),
                             (Continuation<? super Object>) $completion
                     ).getBytes());
@@ -66,31 +68,33 @@ public class PersistingWrapper {
         }
     }
 
-    public static final Wrapper wrapper = new Wrapper() {
-        public <T> Object invoke(
-                @NotNull Function1<? super Continuation<? super T>, ?> function1,
-                @NotNull Continuation<? super T> continuation
-        ) {
-            PersistedContinuation<T> persistedContinuation = new PersistedContinuation<>(continuation);
-            if (Files.exists(STATE_PATH)) {
-                try (var input = Files.newInputStream(STATE_PATH)) {
-                    var cancellableContinuationReference = new AtomicReference<CancellableContinuation<? super Unit>>();
-                    Object coroutineSuspended = CancellableContinuationKt.suspendCancellableCoroutine(
-                            cancellableContinuation -> {
-                                cancellableContinuationReference.set(cancellableContinuation);
-                                return Unit.INSTANCE;
-                            },
-                            (Continuation<Unit>) (Continuation<?>) Json.Default.decodeFromString(
-                                    new ContinuationSerializer(persistedContinuation), new String(input.readAllBytes())
-                            )
-                    );
-                    cancellableContinuationReference.get().resume(Unit.INSTANCE, null);
-                    return coroutineSuspended;
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
+    public static Wrapper wrapper(StringFormat stringFormat) {
+        return new Wrapper() {
+            public <T> Object invoke(
+                    @NotNull Function1<? super Continuation<? super T>, ?> function1,
+                    @NotNull Continuation<? super T> continuation
+            ) {
+                PersistedContinuation<T> persistedContinuation = new PersistedContinuation<>(stringFormat, continuation);
+                if (Files.exists(STATE_PATH)) {
+                    try (var input = Files.newInputStream(STATE_PATH)) {
+                        var cancellableContinuationReference = new AtomicReference<CancellableContinuation<? super Unit>>();
+                        Object coroutineSuspended = CancellableContinuationKt.suspendCancellableCoroutine(
+                                cancellableContinuation -> {
+                                    cancellableContinuationReference.set(cancellableContinuation);
+                                    return Unit.INSTANCE;
+                                },
+                                (Continuation<Unit>) (Continuation<?>) stringFormat.decodeFromString(
+                                        new ContinuationSerializer(persistedContinuation), new String(input.readAllBytes())
+                                )
+                        );
+                        cancellableContinuationReference.get().resume(Unit.INSTANCE, null);
+                        return coroutineSuspended;
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
                 }
+                return function1.invoke(persistedContinuation);
             }
-            return function1.invoke(persistedContinuation);
-        }
-    };
+        };
+    }
 }
