@@ -53,14 +53,14 @@ object TripBooking {
     }
     delay(1000)
     @PersistedField val carReservationID = Random().nextInt()
-    @PersistencePoint val _10 = persist()
+    @PersistencePoint("a") val _10 = persist()
     rollbackIfThrows({ println("undoing $carReservationID") }) {
       @PersistedField val hotelReservationID = Random().nextInt()
-      @PersistencePoint val _20 = persist()
+      @PersistencePoint("b") val _20 = persist()
       rollbackIfThrows({ println("undoing $hotelReservationID") }) {
         @PersistedField val flightReservationID = Random().nextInt()
-        @PersistencePoint val _30 = persist()
-        @PersistencePoint val _15 = foo(newId(), newId())
+        @PersistencePoint("c") val _30 = persist()
+        @PersistencePoint("d") val _15 = foo(newId(), newId())
         println(name)
         Tuple3(carReservationID, hotelReservationID, flightReservationID)
       }

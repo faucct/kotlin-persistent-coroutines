@@ -22,19 +22,22 @@ import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.cli.common.messages.MessageCollector
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
+import org.jetbrains.kotlin.ir.declarations.IrFile
 import org.jetbrains.kotlin.ir.declarations.IrFunction
 import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
 import org.jetbrains.kotlin.ir.declarations.IrVariable
-import org.jetbrains.kotlin.ir.expressions.IrExpression
-import org.jetbrains.kotlin.ir.expressions.IrSuspendableExpression
-import org.jetbrains.kotlin.ir.expressions.IrSuspensionPoint
+import org.jetbrains.kotlin.ir.expressions.*
+import org.jetbrains.kotlin.ir.expressions.impl.IrConstImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrConstructorCallImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrVarargImpl
+import org.jetbrains.kotlin.ir.types.IrSimpleType
 import org.jetbrains.kotlin.ir.types.classFqName
 import org.jetbrains.kotlin.ir.types.defaultType
 import org.jetbrains.kotlin.ir.util.constructors
+import org.jetbrains.kotlin.ir.util.isSuspend
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.name.FqName
+import org.jetbrains.kotlin.utils.addToStdlib.cast
 
 class TemplateIrGenerationExtension(
   private val messageCollector: MessageCollector,
@@ -44,83 +47,131 @@ class TemplateIrGenerationExtension(
   override fun generate(moduleFragment: IrModuleFragment, pluginContext: IrPluginContext) {
     val compiledPersistableContinuationClass =
       pluginContext.referenceClass(FqName(CompiledPersistableContinuation::class.qualifiedName!!))!!
+    val compiledPersistableContinuationPersistencePointClass =
+      pluginContext.referenceClass(FqName(CompiledPersistableContinuation.PersistencePoint::class.qualifiedName!!))!!
+    val compiledPersistableContinuationVariableClass =
+      pluginContext.referenceClass(FqName(CompiledPersistableContinuation.Variable::class.qualifiedName!!))!!
     val persistedFieldClass =
       pluginContext.referenceClass(FqName(PersistedField::class.qualifiedName!!))!!
     val persistencePointClass =
       pluginContext.referenceClass(FqName(PersistencePoint::class.qualifiedName!!))!!
     moduleFragment.accept(object : IrElementTransformerVoid() {
-      override fun visitSuspensionPoint(expression: IrSuspensionPoint): IrExpression {
-        return super.visitSuspensionPoint(expression)
-      }
+      override fun visitFile(file: IrFile): IrFile {
+        file.accept(object : IrElementTransformerVoid() {
+          override fun visitSuspensionPoint(expression: IrSuspensionPoint): IrExpression {
+            return super.visitSuspensionPoint(expression)
+          }
 
-      override fun visitSuspendableExpression(expression: IrSuspendableExpression): IrExpression {
-        return super.visitSuspendableExpression(expression)
-      }
+          override fun visitSuspendableExpression(expression: IrSuspendableExpression): IrExpression {
+            return super.visitSuspendableExpression(expression)
+          }
 
-      override fun visitFunction(declaration: IrFunction): IrStatement {
-        for (functionAnnotation in declaration.annotations) {
-          if (functionAnnotation.type.classFqName?.asString() == PersistableContinuation::class.qualifiedName!!) {
+          override fun visitFunction(declaration: IrFunction): IrStatement {
+            for (functionAnnotation in declaration.annotations) {
+              if (functionAnnotation.type.classFqName?.asString() == PersistableContinuation::class.qualifiedName!!) {
 //            val persistencePointsLabels = LinkedHashMap<String, Int>()
 //            val persistencePointsNames = LinkedHashSet<String>()
-            val statement = object : IrElementTransformerVoid() {
-              var labels = 0
-              override fun visitSuspensionPoint(expression: IrSuspensionPoint): IrExpression {
-                labels++
-                return super.visitSuspensionPoint(expression)
-              }
-
-              override fun visitSuspendableExpression(expression: IrSuspendableExpression): IrExpression {
-                labels++
-                return super.visitSuspendableExpression(expression)
-              }
-
-              override fun visitVariable(declaration: IrVariable): IrStatement {
-                for (variableAnnotation in declaration.annotations) {
-                  if (variableAnnotation.type == persistedFieldClass.defaultType) {
-                    declaration.name
+                val persistencePoints = arrayListOf<IrVarargElement>()
+                val variables = arrayListOf<IrVarargElement>()
+                val statement = object : IrElementTransformerVoid() {
+                  override fun visitCall(expression: IrCall): IrExpression {
+//                    if (expression.isSuspend) {
+//                      throw RuntimeException()
+//                    }
+                    return super.visitCall(expression)
                   }
-                  if (variableAnnotation.type == persistencePointClass.defaultType) {
-                    val value = object : IrElementTransformerVoid() {
-                      var label = -1
-                      override fun visitSuspendableExpression(expression: IrSuspendableExpression): IrExpression {
-                        if (label != -1) {
-                          throw RuntimeException("persistence point has multiple suspension expressions")
-                        }
-                        label = labels++
-                        return super.visitSuspendableExpression(expression)
+
+                  override fun visitVariable(declaration: IrVariable): IrStatement {
+                    for (variableAnnotation in declaration.annotations) {
+                      if (variableAnnotation.type == persistedFieldClass.defaultType) {
+                        val variable = IrConstructorCallImpl(
+                          startOffset = functionAnnotation.startOffset,
+                          endOffset = functionAnnotation.endOffset,
+                          constructorTypeArgumentsCount = 0,
+                          symbol = compiledPersistableContinuationVariableClass.constructors.single(),
+                          type = compiledPersistableContinuationVariableClass.defaultType,
+                          typeArgumentsCount = 0,
+                          valueArgumentsCount = 3,
+                        )
+                        var argument = 0
+                        variable.putValueArgument(
+                          argument++, IrConstImpl(
+                            UNDEFINED_OFFSET, UNDEFINED_OFFSET, pluginContext.irBuiltIns.stringType, IrConstKind.String,
+                            declaration.name.asString(),
+                          )
+                        )
+                        variable.putValueArgument(
+                          argument++, org.jetbrains.kotlin.ir.expressions.impl.IrClassReferenceImpl(
+                            UNDEFINED_OFFSET, UNDEFINED_OFFSET, pluginContext.irBuiltIns.anyClass.defaultType,
+                            declaration.type.cast<IrSimpleType>().classifier, declaration.type,
+                          )
+                        )
+                        variable.putValueArgument(
+                          argument++, IrConstImpl(
+                            UNDEFINED_OFFSET, UNDEFINED_OFFSET, pluginContext.irBuiltIns.stringType, IrConstKind.String,
+                            declaration.name.asString(),
+                          )
+                        )
+                        variables.add(variable)
+                      }
+                      if (variableAnnotation.type == persistencePointClass.defaultType) {
+                        val irCall = declaration.initializer.cast<IrCall>()
+                        assert(irCall.isSuspend)
+                        val persistencePoint = IrConstructorCallImpl(
+                          startOffset = functionAnnotation.startOffset,
+                          endOffset = functionAnnotation.endOffset,
+                          constructorTypeArgumentsCount = 0,
+                          symbol = compiledPersistableContinuationPersistencePointClass.constructors.single(),
+                          type = compiledPersistableContinuationPersistencePointClass.defaultType,
+                          typeArgumentsCount = 0,
+                          valueArgumentsCount = 2,
+                        )
+                        var argument = 0
+                        persistencePoint.putValueArgument(
+                          argument++, IrConstImpl(
+                            UNDEFINED_OFFSET, UNDEFINED_OFFSET, pluginContext.irBuiltIns.intType, IrConstKind.Int,
+                            file.fileEntry.getLineNumber(irCall.startOffset),
+                          )
+                        )
+                        persistencePoint.putValueArgument(argument++, variableAnnotation.getValueArgument(0))
+                        persistencePoints.add(persistencePoint)
                       }
                     }
-                    value.visitVariable(declaration)
-//                    if (value.label == -1) {
-//                      throw RuntimeException("persistence point has no suspension expressions")
-//                    }
-//                    variableAnnotation.getValueArgument(0) as
-//                    persistencePointsLabels.put(variableAnnotation.getValueArgument(0))
+                    return super.visitVariable(declaration)
                   }
-                }
-                return super.visitVariable(declaration)
+                }.visitFunction(declaration)
+                var argument = 0
+                val compiledPersistableContinuation = IrConstructorCallImpl(
+                  startOffset = functionAnnotation.startOffset,
+                  endOffset = functionAnnotation.endOffset,
+                  constructorTypeArgumentsCount = 0,
+                  symbol = compiledPersistableContinuationClass.constructors.single(),
+                  type = compiledPersistableContinuationClass.defaultType,
+                  typeArgumentsCount = 0,
+                  valueArgumentsCount = 2,
+                )
+                compiledPersistableContinuation.putValueArgument(
+                  argument++, IrVarargImpl(
+                    UNDEFINED_OFFSET, UNDEFINED_OFFSET,
+                    compiledPersistableContinuationPersistencePointClass.defaultType,
+                    pluginContext.irBuiltIns.intType, persistencePoints
+                  )
+                )
+                compiledPersistableContinuation.putValueArgument(
+                  argument++, IrVarargImpl(
+                    UNDEFINED_OFFSET, UNDEFINED_OFFSET,
+                    compiledPersistableContinuationVariableClass.defaultType,
+                    pluginContext.irBuiltIns.intType, variables,
+                  )
+                )
+                declaration.annotations = declaration.annotations + compiledPersistableContinuation
+                return statement
               }
-            }.visitFunction(declaration)
-            val compiledPersistableContinuation = IrConstructorCallImpl(
-              startOffset = functionAnnotation.startOffset,
-              endOffset = functionAnnotation.endOffset,
-              constructorTypeArgumentsCount = 0,
-              symbol = compiledPersistableContinuationClass.constructors.single(),
-              type = compiledPersistableContinuationClass.defaultType,
-              typeArgumentsCount = 0,
-              valueArgumentsCount = 1,
-            )
-            compiledPersistableContinuation.putValueArgument(
-              0, IrVarargImpl(
-                UNDEFINED_OFFSET, UNDEFINED_OFFSET,
-                pluginContext.irBuiltIns.intArray.defaultType, pluginContext.irBuiltIns.intType, emptyList()
-              )
-            )
-            declaration.annotations = declaration.annotations + compiledPersistableContinuation
-            return statement
+            }
+            return super.visitFunction(declaration)
           }
-        }
-        return super.visitFunction(declaration)
+        }, null)
+        return super.visitFile(file)
       }
     }, null)
     messageCollector.report(CompilerMessageSeverity.INFO, "Argument 'string' = $string")

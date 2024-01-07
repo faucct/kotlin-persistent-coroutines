@@ -51,19 +51,21 @@ fun debug() = "Hello, World!"
   import com.bnorm.template.PersistableContinuation
   import com.bnorm.template.PersistedField
   import com.bnorm.template.PersistencePoint
+  import com.bnorm.template.Typed
   import javaslang.Tuple3
 
   @PersistableContinuation
-  suspend fun bookTrip(@PersistedField name: String) = coroutineScope {
-    @PersistencePoint val _a = delay(0)
+  suspend fun bookTrip(@PersistedField name: String) {
     @PersistedField val carReservationID = Random().nextInt()
-//    @PersistencePoint val _10 = persist()
+    @PersistencePoint("a") val a = delay(0)
+    @PersistencePoint("b") val ignored = delay(0)
+//    @PersistencePoint("c") val _10 = persist()
 //    rollbackIfThrows({ println("undoing carReservationID") }) {
 //      @PersistedField val hotelReservationID = Random().nextInt()
-//      @PersistencePoint val _20 = persist()
+//      @PersistencePoint("d") val _20 = persist()
 //      rollbackIfThrows({ println("undoing hotelReservationID") }) {
 //        @PersistedField val flightReservationID = Random().nextInt()
-//        @PersistencePoint val _30 = persist()
+//        @PersistencePoint("e") val _30 = persist()
 ////        Tuple3(carReservationID, hotelReservationID, flightReservationID)
 //      }
 //    }

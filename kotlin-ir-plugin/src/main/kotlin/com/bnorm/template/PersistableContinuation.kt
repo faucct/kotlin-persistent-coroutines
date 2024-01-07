@@ -1,6 +1,6 @@
 package com.bnorm.template
 
 @Target(AnnotationTarget.FUNCTION)
-@Retention(AnnotationRetention.RUNTIME)
+@Retention(AnnotationRetention.SOURCE)
 annotation class PersistableContinuation(
 )
