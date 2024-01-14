@@ -162,7 +162,7 @@ class TemplateIrGenerationExtension(
                     pluginContext.irBuiltIns.intType, variables,
                   )
                 )
-                declaration.annotations = declaration.annotations + compiledPersistableContinuation
+                declaration.annotations += compiledPersistableContinuation
                 return statement
               }
             }
