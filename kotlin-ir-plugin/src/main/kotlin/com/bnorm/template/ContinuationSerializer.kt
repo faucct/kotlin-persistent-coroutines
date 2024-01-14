@@ -20,7 +20,9 @@ import kotlin.coroutines.jvm.internal.BaseContinuationImpl
 import kotlin.coroutines.jvm.internal.DebugMetadata
 
 @OptIn(ExperimentalSerializationApi::class, InternalSerializationApi::class)
-class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KSerializer<Continuation<Any?>> {
+class ContinuationSerializer(
+  private val classLoader: ClassLoader, private val rootContinuation: Continuation<*>
+) : KSerializer<Continuation<Any?>> {
   companion object {
     val continuationDescriptor = buildSerialDescriptor(
       Continuation::class.java.typeName, kotlinx.serialization.descriptors.StructureKind.MAP,
@@ -58,8 +60,9 @@ class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KS
         decodeInlineElement(descriptor, 0).decodeStructure(descriptor) {
           assert(decodeSerializableElement(descriptor, decodeElementIndex(descriptor), StringSerializer) == "type")
           val type = decodeSerializableElement(descriptor, decodeElementIndex(descriptor), StringSerializer)
-          val clazz = ClassLoader.getSystemClassLoader().loadClass(type)
+          val clazz = classLoader.loadClass(type)
           val constructor = clazz.declaredConstructors.single()
+          assert(constructor.trySetAccessible())
           delegate = constructor.newInstance(*(constructor.parameters.dropLast(1).map { parameter ->
             val serializer = serializersModule.serializer(parameter.type)
             if (serializer is SingletonKSerializer) {
@@ -69,16 +72,23 @@ class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KS
             }
           } + listOf(delegate)).toTypedArray()).cast()
           val debugMetadata = clazz.getAnnotation(DebugMetadata::class.java)
+          val compiledPersistableContinuationAnnotation =
+            classLoader.loadClass(debugMetadata.className).declaredMethods.single {
+              it.name == debugMetadata.methodName
+            }.getAnnotation(CompiledPersistableContinuation::class.java)
           assert(decodeStringElement(descriptor, decodeElementIndex(descriptor)) == "label")
           val label = decodeSerializableElement(descriptor, decodeElementIndex(descriptor), IntSerializer)
-          clazz.getDeclaredField("label").set(delegate, label)
+          val labelField = clazz.getDeclaredField("label")
+          assert(labelField.trySetAccessible())
+          labelField.set(delegate, label)
           forEachSpilledLocalNameAndField(debugMetadata, label) { localName, spilled ->
             val field = clazz.getDeclaredField(spilled)
+            assert(field.trySetAccessible())
             val serializer = serializersModule.serializer(
               if (localName == "this")
-                ClassLoader.getSystemClassLoader().loadClass(debugMetadata.className)
+                classLoader.loadClass(debugMetadata.className)
               else
-                field.type
+                compiledPersistableContinuationAnnotation.variables.single { it.name == localName }.type.java
             )
             field.set(
               delegate, if (serializer is SingletonKSerializer) {
@@ -104,7 +114,13 @@ class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KS
         }
         val debugMetadata = continuation.javaClass.getAnnotation(DebugMetadata::class.java)!!
         rec((continuation as BaseContinuationImpl).completion!!)
-        val label = continuation.javaClass.getDeclaredField("label").getInt(continuation)
+        val compiledPersistableContinuationAnnotation =
+          classLoader.loadClass(debugMetadata.className).declaredMethods.single {
+            it.name == debugMetadata.methodName
+          }.getAnnotation(CompiledPersistableContinuation::class.java)
+        val labelField = continuation.javaClass.getDeclaredField("label")
+        assert(labelField.trySetAccessible())
+        val label = labelField.getInt(continuation)
         encodeInlineElement(descriptor, 0).encodeStructure(descriptor) {
           var index = 0
           encodeStringElement(descriptor, index++, "type")
@@ -113,11 +129,12 @@ class ContinuationSerializer(private val rootContinuation: Continuation<*>) : KS
           encodeIntElement(descriptor, index++, label)
           forEachSpilledLocalNameAndField(debugMetadata, label) { localName, spilled ->
             val field = continuation.javaClass.getDeclaredField(spilled)
+            assert(field.trySetAccessible())
             val serializer = serializersModule.serializer(
               if (localName == "this")
-                ClassLoader.getSystemClassLoader().loadClass(debugMetadata.className)
+                classLoader.loadClass(debugMetadata.className)
               else
-                field.type
+                compiledPersistableContinuationAnnotation.variables.single { it.name == localName }.type.java
             )
             if (serializer !is SingletonKSerializer) {
               encodeStringElement(descriptor, index++, localName)

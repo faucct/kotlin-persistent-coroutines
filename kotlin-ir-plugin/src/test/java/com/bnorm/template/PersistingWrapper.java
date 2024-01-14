@@ -24,9 +24,9 @@ public class PersistingWrapper {
         private final Continuation<? super T> continuation;
         private final CoroutineContext coroutineContext;
 
-        private PersistedContinuation(StringFormat stringFormat, Continuation<? super T> continuation) {
+        private PersistedContinuation(ClassLoader classLoader, StringFormat stringFormat, Continuation<? super T> continuation) {
             this.continuation = continuation;
-            coroutineContext = new PersistingCoroutineContext<>(stringFormat, this).plus(continuation.getContext());
+            coroutineContext = new PersistingCoroutineContext<>(classLoader, stringFormat, this).plus(continuation.getContext());
         }
 
         @NotNull
@@ -42,10 +42,12 @@ public class PersistingWrapper {
     }
 
     public static class PersistingCoroutineContext<T> extends Persistor {
+        private final ClassLoader classLoader;
         private final StringFormat stringFormat;
         private final PersistedContinuation<T> persistedContinuation;
 
-        public PersistingCoroutineContext(StringFormat stringFormat, PersistedContinuation<T> persistedContinuation) {
+        public PersistingCoroutineContext(ClassLoader classLoader, StringFormat stringFormat, PersistedContinuation<T> persistedContinuation) {
+            this.classLoader = classLoader;
             this.stringFormat = stringFormat;
             this.persistedContinuation = persistedContinuation;
         }
@@ -56,7 +58,7 @@ public class PersistingWrapper {
             try {
                 try (var output = Files.newOutputStream(OUTPUT_PATH)) {
                     output.write(stringFormat.encodeToString(
-                            new ContinuationSerializer(persistedContinuation),
+                            new ContinuationSerializer(classLoader, persistedContinuation),
                             (Continuation<? super Object>) $completion
                     ).getBytes());
                 }
@@ -68,13 +70,13 @@ public class PersistingWrapper {
         }
     }
 
-    public static Wrapper wrapper(StringFormat stringFormat) {
+    public static Wrapper wrapper(ClassLoader classLoader, StringFormat stringFormat) {
         return new Wrapper() {
             public <T> Object invoke(
                     @NotNull Function1<? super Continuation<? super T>, ?> function1,
                     @NotNull Continuation<? super T> continuation
             ) {
-                PersistedContinuation<T> persistedContinuation = new PersistedContinuation<>(stringFormat, continuation);
+                PersistedContinuation<T> persistedContinuation = new PersistedContinuation<>(classLoader, stringFormat, continuation);
                 if (Files.exists(STATE_PATH)) {
                     try (var input = Files.newInputStream(STATE_PATH)) {
                         var cancellableContinuationReference = new AtomicReference<CancellableContinuation<? super Unit>>();
@@ -84,7 +86,8 @@ public class PersistingWrapper {
                                     return Unit.INSTANCE;
                                 },
                                 (Continuation<Unit>) (Continuation<?>) stringFormat.decodeFromString(
-                                        new ContinuationSerializer(persistedContinuation), new String(input.readAllBytes())
+                                        new ContinuationSerializer(classLoader, persistedContinuation),
+                                        new String(input.readAllBytes())
                                 )
                         );
                         cancellableContinuationReference.get().resume(Unit.INSTANCE, null);

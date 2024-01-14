@@ -88,6 +88,108 @@ fun debug() = "Hello, World!"
     )
     assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode)
   }
+
+  @Test
+  fun `IR plugin success3`() {
+    val result = compile(
+      sourceFile = SourceFile.kotlin(
+        "Main.kt", """
+import com.bnorm.template.Color
+import com.bnorm.template.PersistingWrapper.wrapper
+import com.bnorm.template.Persistor
+import com.bnorm.template.SingletonKSerializer
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.modules.SerializersModule
+import kotlinx.serialization.serializer
+import kotlin.coroutines.coroutineContext
+import java.util.*
+import com.bnorm.template.PersistableContinuation
+import com.bnorm.template.PersistedField
+import com.bnorm.template.PersistencePoint
+
+var persisting = false
+@PersistableContinuation
+suspend fun persist() {
+  persisting = true
+  @PersistencePoint("persist") val persist = coroutineContext[Persistor]!!.persist()
+  if (persisting) {
+    throw RuntimeException("")
+  }
+}
+
+class Main {
+  @PersistableContinuation
+  suspend fun foo() {
+    @PersistedField val a = "a"
+    println("hi")
+    @PersistencePoint("barring") val barring = persist()
+    bar()
+    println("then ${'$'}a")
+    delay(1000)
+    yield()
+    println("later")
+  }
+
+  @PersistableContinuation
+  suspend fun bar() {
+    println("bar")
+    @PersistencePoint("delaying") val delaying = persist()
+    println("then")
+    delay(1000)
+    yield()
+    println("later")
+  }
+
+  suspend fun supplier(): Int {
+    persist()
+    return 0
+  }
+
+  suspend fun consumer(a: Int, b: Int) {
+    println("bar")
+    persist()
+    println("then")
+    delay(1000)
+    yield()
+    println("later")
+  }
+
+  suspend fun supplierConsumer() {
+    consumer(
+      Random().nextInt(),
+      supplier(),
+    )
+  }
+
+  companion object {
+    @JvmStatic
+    fun main() {
+      Json.encodeToString(Json.serializersModule.serializer(), Color(1, 2))
+      val main = Main()
+      val json = Json {
+        serializersModule = SerializersModule {
+          contextual(Main::class, SingletonKSerializer(main))
+        }
+      }
+      val message = runBlocking @PersistableContinuation {
+        (wrapper(Main::class.java.classLoader, json)) @PersistableContinuation {
+          @PersistencePoint("fooing") val fooing = Main().foo()
+          "foo"
+        }
+      }
+      println(message)
+    }
+  }
+}
+"""
+      )
+    )
+    assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode)
+    println(result.classLoader.loadClass("Main").getDeclaredMethod("main").invoke(null))
+  }
 }
 
 fun compile(

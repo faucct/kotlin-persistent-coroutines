@@ -1,5 +1,6 @@
-package com.bnorm.template
+package com.bnorm.template.main
 
+import com.bnorm.template.*
 import com.bnorm.template.PersistingWrapper.wrapper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -8,11 +9,12 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.modules.SerializersModule
 import kotlinx.serialization.serializer
 import kotlin.coroutines.coroutineContext
+import java.util.*
 
 var persisting = false
 suspend fun persist() {
   persisting = true
-  coroutineContext[Persistor.Key]!!.persist()
+  coroutineContext[Persistor]!!.persist()
   if (persisting) {
     throw RuntimeException("")
   }
@@ -38,6 +40,27 @@ class Main {
     yield()
     println("later")
   }
+
+  suspend fun supplier(): Int {
+    persist()
+    return 0
+  }
+
+  suspend fun consumer(a: Int, b: Int) {
+    println("bar")
+    persist()
+    println("then")
+    delay(1000)
+    yield()
+    println("later")
+  }
+
+  suspend fun supplierConsumer() {
+    consumer(
+      Random().nextInt(),
+      supplier(),
+    )
+  }
 }
 
 fun main() {
@@ -48,9 +71,9 @@ fun main() {
       contextual(Main::class, SingletonKSerializer(main))
     }
   }
-  val message = runBlocking {
-    (wrapper(json)) {
-      Main().foo()
+  val message = runBlocking @PersistableContinuation {
+    (wrapper(Main::class.java.classLoader, json)) @PersistableContinuation {
+      @PersistencePoint("fooing") val fooing = Main().foo()
       "foo"
     }
   }
