@@ -129,7 +129,7 @@ class Main {
     @PersistedField val a = "a"
     println("hi")
     @PersistencePoint("barring") val barring = persist()
-    bar()
+    @PersistencePoint("delaying") val delaying = bar()
     println("then ${'$'}a")
     delay(1000)
     yield()

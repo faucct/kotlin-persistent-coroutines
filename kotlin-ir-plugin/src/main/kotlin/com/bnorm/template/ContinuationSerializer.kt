@@ -10,7 +10,6 @@ import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.descriptors.SerialKind
 import kotlinx.serialization.descriptors.buildSerialDescriptor
 import kotlinx.serialization.encoding.*
-import kotlinx.serialization.internal.IntSerializer
 import kotlinx.serialization.internal.PrimitiveSerialDescriptor
 import kotlinx.serialization.internal.StringSerializer
 import kotlinx.serialization.serializer
@@ -76,9 +75,13 @@ class ContinuationSerializer(
               it.name == debugMetadata.methodName
             }.getAnnotation(CompiledPersistableContinuation::class.java)
           assert(decodeStringElement(descriptor, decodeElementIndex(descriptor)) == "label")
-          val label = decodeSerializableElement(descriptor, decodeElementIndex(descriptor), IntSerializer)
+          val persistencePointKey = decodeStringElement(descriptor, decodeElementIndex(descriptor))
+          val persistencePoint = compiledPersistableContinuationAnnotation.persistencePoints.single {
+            it.serialized == persistencePointKey
+          }
           val labelField = clazz.getDeclaredField("label")
           assert(labelField.trySetAccessible())
+          val label = debugMetadata.lineNumbers.indexOfFirst { it - 1 == persistencePoint.lineNumber } + 1
           labelField.set(delegate, label)
           forEachSpilledLocalNameAndField(debugMetadata, label) { localName, spilled ->
             val field = clazz.getDeclaredField(spilled)
@@ -112,20 +115,23 @@ class ContinuationSerializer(
           return
         }
         val debugMetadata = continuation.javaClass.getAnnotation(DebugMetadata::class.java)!!
-        rec((continuation as BaseContinuationImpl).completion!!)
         val compiledPersistableContinuationAnnotation =
           classLoader.loadClass(debugMetadata.className).declaredMethods.single {
             it.name == debugMetadata.methodName
           }.getAnnotation(CompiledPersistableContinuation::class.java)
+        rec((continuation as BaseContinuationImpl).completion!!)
         val labelField = continuation.javaClass.getDeclaredField("label")
         assert(labelField.trySetAccessible())
         val label = labelField.getInt(continuation)
+        val persistencePoint = compiledPersistableContinuationAnnotation.persistencePoints.single {
+          it.lineNumber == debugMetadata.lineNumbers[label - 1] - 1
+        }
         encodeInlineElement(descriptor, 0).encodeStructure(descriptor) {
           var index = 0
           encodeStringElement(descriptor, index++, "type")
           encodeStringElement(descriptor, index++, continuation::class.java.typeName)
           encodeStringElement(descriptor, index++, "label")
-          encodeIntElement(descriptor, index++, label)
+          encodeStringElement(descriptor, index++, persistencePoint.serialized)
           forEachSpilledLocalNameAndField(debugMetadata, label) { localName, spilled ->
             val field = continuation.javaClass.getDeclaredField(spilled)
             assert(field.trySetAccessible())
