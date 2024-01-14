@@ -14,7 +14,6 @@ import kotlinx.serialization.internal.IntSerializer
 import kotlinx.serialization.internal.PrimitiveSerialDescriptor
 import kotlinx.serialization.internal.StringSerializer
 import kotlinx.serialization.serializer
-import org.jetbrains.kotlin.utils.addToStdlib.cast
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.jvm.internal.BaseContinuationImpl
 import kotlin.coroutines.jvm.internal.DebugMetadata
@@ -22,7 +21,7 @@ import kotlin.coroutines.jvm.internal.DebugMetadata
 @OptIn(ExperimentalSerializationApi::class, InternalSerializationApi::class)
 class ContinuationSerializer(
   private val classLoader: ClassLoader, private val rootContinuation: Continuation<*>
-) : KSerializer<Continuation<Any?>> {
+) : KSerializer<Continuation<*>> {
   companion object {
     val continuationDescriptor = buildSerialDescriptor(
       Continuation::class.java.typeName, kotlinx.serialization.descriptors.StructureKind.MAP,
@@ -52,7 +51,7 @@ class ContinuationSerializer(
     get() = buildSerialDescriptor("com.bnorm.template.ContinuationSerializer", SerialKind.CONTEXTUAL) {
     }
 
-  override fun deserialize(decoder: Decoder): Continuation<Any?> {
+  override fun deserialize(decoder: Decoder): Continuation<*> {
     val descriptor = continuationDescriptor
     return decoder.decodeStructure(continuationsDescriptor) {
       var delegate = rootContinuation
@@ -70,7 +69,7 @@ class ContinuationSerializer(
             } else {
               decodeSerializableElement(descriptor, decodeElementIndex(descriptor), serializer)
             }
-          } + listOf(delegate)).toTypedArray()).cast()
+          } + listOf(delegate)).toTypedArray()) as Continuation<*>
           val debugMetadata = clazz.getAnnotation(DebugMetadata::class.java)
           val compiledPersistableContinuationAnnotation =
             classLoader.loadClass(debugMetadata.className).declaredMethods.single {
@@ -101,14 +100,14 @@ class ContinuationSerializer(
           }
         }
       }
-      delegate.cast()
+      delegate
     }
   }
 
-  override fun serialize(encoder: Encoder, value: Continuation<Any?>) {
+  override fun serialize(encoder: Encoder, value: Continuation<*>) {
     val descriptor = continuationDescriptor
     encoder.encodeStructure(continuationsDescriptor) {
-      fun rec(continuation: Continuation<Any?>) {
+      fun rec(continuation: Continuation<*>) {
         if (continuation == rootContinuation) {
           return
         }

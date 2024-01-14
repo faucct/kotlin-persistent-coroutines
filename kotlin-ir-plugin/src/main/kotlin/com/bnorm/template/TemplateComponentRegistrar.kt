@@ -25,6 +25,7 @@ import org.jetbrains.kotlin.compiler.plugin.ComponentRegistrar
 import org.jetbrains.kotlin.config.CompilerConfiguration
 
 @AutoService(ComponentRegistrar::class)
+@org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 class TemplateComponentRegistrar(
   private val defaultString: String,
   private val defaultFile: String,

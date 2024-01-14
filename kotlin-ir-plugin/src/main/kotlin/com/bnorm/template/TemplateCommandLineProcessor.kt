@@ -24,6 +24,7 @@ import org.jetbrains.kotlin.config.CompilerConfiguration
 import org.jetbrains.kotlin.config.CompilerConfigurationKey
 
 @AutoService(CommandLineProcessor::class)
+@org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 class TemplateCommandLineProcessor : CommandLineProcessor {
   companion object {
     private const val OPTION_STRING = "string"

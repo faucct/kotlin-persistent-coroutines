@@ -36,8 +36,6 @@ import org.jetbrains.kotlin.ir.types.defaultType
 import org.jetbrains.kotlin.ir.util.constructors
 import org.jetbrains.kotlin.ir.util.isSuspend
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
-import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.utils.addToStdlib.cast
 
 class TemplateIrGenerationExtension(
   private val messageCollector: MessageCollector,
@@ -46,18 +44,18 @@ class TemplateIrGenerationExtension(
 ) : IrGenerationExtension {
   override fun generate(moduleFragment: IrModuleFragment, pluginContext: IrPluginContext) {
     val compiledPersistableContinuationClass =
-      pluginContext.referenceClass(FqName(CompiledPersistableContinuation::class.qualifiedName!!))!!
+      pluginContext.referenceClass(org.jetbrains.kotlin.name.ClassId.fromString(CompiledPersistableContinuation::class.qualifiedName!!))!!
     val compiledPersistableContinuationPersistencePointClass =
-      pluginContext.referenceClass(FqName(CompiledPersistableContinuation.PersistencePoint::class.qualifiedName!!))!!
+      pluginContext.referenceClass(org.jetbrains.kotlin.name.ClassId.fromString(CompiledPersistableContinuation.PersistencePoint::class.qualifiedName!!))!!
     val compiledPersistableContinuationVariableClass =
-      pluginContext.referenceClass(FqName(CompiledPersistableContinuation.Variable::class.qualifiedName!!))!!
+      pluginContext.referenceClass(org.jetbrains.kotlin.name.ClassId.fromString(CompiledPersistableContinuation.Variable::class.qualifiedName!!))!!
     val persistedFieldClass =
-      pluginContext.referenceClass(FqName(PersistedField::class.qualifiedName!!))!!
+      pluginContext.referenceClass(org.jetbrains.kotlin.name.ClassId.fromString(PersistedField::class.qualifiedName!!))!!
     val persistencePointClass =
-      pluginContext.referenceClass(FqName(PersistencePoint::class.qualifiedName!!))!!
+      pluginContext.referenceClass(org.jetbrains.kotlin.name.ClassId.fromString(PersistencePoint::class.qualifiedName!!))!!
     moduleFragment.accept(object : IrElementTransformerVoid() {
       override fun visitFile(file: IrFile): IrFile {
-        file.accept(object : IrElementTransformerVoid() {
+        open class PersistableContinuationTransformerVoid : IrElementTransformerVoid() {
           override fun visitSuspensionPoint(expression: IrSuspensionPoint): IrExpression {
             return super.visitSuspensionPoint(expression)
           }
@@ -73,7 +71,7 @@ class TemplateIrGenerationExtension(
 //            val persistencePointsNames = LinkedHashSet<String>()
                 val persistencePoints = arrayListOf<IrVarargElement>()
                 val variables = arrayListOf<IrVarargElement>()
-                val statement = object : IrElementTransformerVoid() {
+                val statement = object : PersistableContinuationTransformerVoid() {
                   override fun visitCall(expression: IrCall): IrExpression {
 //                    if (expression.isSuspend) {
 //                      throw RuntimeException()
@@ -103,7 +101,7 @@ class TemplateIrGenerationExtension(
                         variable.putValueArgument(
                           argument++, org.jetbrains.kotlin.ir.expressions.impl.IrClassReferenceImpl(
                             UNDEFINED_OFFSET, UNDEFINED_OFFSET, pluginContext.irBuiltIns.anyClass.defaultType,
-                            declaration.type.cast<IrSimpleType>().classifier, declaration.type,
+                            (declaration.type as IrSimpleType).classifier, declaration.type,
                           )
                         )
                         variable.putValueArgument(
@@ -115,7 +113,7 @@ class TemplateIrGenerationExtension(
                         variables.add(variable)
                       }
                       if (variableAnnotation.type == persistencePointClass.defaultType) {
-                        val irCall = declaration.initializer.cast<IrCall>()
+                        val irCall = declaration.initializer as IrCall
                         assert(irCall.isSuspend)
                         val persistencePoint = IrConstructorCallImpl(
                           startOffset = functionAnnotation.startOffset,
@@ -139,7 +137,7 @@ class TemplateIrGenerationExtension(
                     }
                     return super.visitVariable(declaration)
                   }
-                }.visitFunction(declaration)
+                }.visitDeclaration(declaration)
                 var argument = 0
                 val compiledPersistableContinuation = IrConstructorCallImpl(
                   startOffset = functionAnnotation.startOffset,
@@ -170,6 +168,8 @@ class TemplateIrGenerationExtension(
             }
             return super.visitFunction(declaration)
           }
+        }
+        file.accept(object : PersistableContinuationTransformerVoid() {
         }, null)
         return super.visitFile(file)
       }

@@ -14,12 +14,15 @@
  * limitations under the License.
  */
 
+@file:OptIn(ExperimentalCompilerApi::class)
+
 package com.bnorm.template
 
 import com.tschuchort.compiletesting.KotlinCompilation
 import com.tschuchort.compiletesting.SourceFile
 import kotlin.test.assertEquals
 import org.jetbrains.kotlin.compiler.plugin.ComponentRegistrar
+import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 import org.junit.Test
 
 class IrPluginTest {
@@ -199,7 +202,7 @@ fun compile(
   return KotlinCompilation().apply {
     sources = sourceFiles
     useIR = true
-    compilerPlugins = listOf(plugin)
+    componentRegistrars = listOf(plugin)
     inheritClassPath = true
   }.compile()
 }
