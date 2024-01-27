@@ -186,9 +186,7 @@ class Main {
         }
       }
       val message = runBlocking {
-        (wrapper(
-            Main::class.java.classLoader, json, MapClassSerializerFactory.invoke(Main::class, Persist::class)
-        )) @PersistableContinuation("main") {
+        (wrapper(json, MapClassSerializerFactory.invoke(Main::class, Persist::class))) @PersistableContinuation("main") {
           @PersistencePoint("fooing") val fooing = Main().foo()
           "foo"
         }

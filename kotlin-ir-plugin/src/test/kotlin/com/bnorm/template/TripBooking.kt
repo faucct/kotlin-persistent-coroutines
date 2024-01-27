@@ -35,7 +35,7 @@ object TripBooking {
 //      }
 //    }
     runBlocking {
-      (wrapper(ClassLoader.getSystemClassLoader(), Json.Default, ClassLoaderClassSerializer(ClassLoader.getSystemClassLoader()))) {
+      (wrapper(Json.Default, ClassLoaderClassSerializer(ClassLoader.getSystemClassLoader()))) {
         bookTrip("name")
         println("done")
       }

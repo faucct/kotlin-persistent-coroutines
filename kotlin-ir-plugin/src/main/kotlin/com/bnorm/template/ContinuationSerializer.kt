@@ -19,8 +19,7 @@ import kotlin.coroutines.jvm.internal.DebugMetadata
 
 @OptIn(ExperimentalSerializationApi::class, InternalSerializationApi::class)
 class ContinuationSerializer(
-  private val classLoader: ClassLoader, private val rootContinuation: Continuation<*>,
-  private val classSerializer: KSerializer<Class<*>> = ClassLoaderClassSerializer(classLoader),
+  private val rootContinuation: Continuation<*>, private val classSerializer: KSerializer<Class<*>>,
 ) : KSerializer<Continuation<*>> {
   companion object {
     val continuationDescriptor = buildSerialDescriptor(
@@ -71,7 +70,7 @@ class ContinuationSerializer(
           } + listOf(delegate)).toTypedArray()) as Continuation<*>
           val debugMetadata = clazz.getAnnotation(DebugMetadata::class.java)
           val compiledPersistableContinuationAnnotation =
-            classLoader.loadClass(debugMetadata.className).declaredMethods.single {
+            clazz.classLoader.loadClass(debugMetadata.className).declaredMethods.single {
               it.name == debugMetadata.methodName
             }.getAnnotation(CompiledPersistableContinuation::class.java)
           assert(decodeStringElement(descriptor, decodeElementIndex(descriptor)) == "label")
@@ -88,7 +87,7 @@ class ContinuationSerializer(
             assert(field.trySetAccessible())
             val serializer = serializersModule.serializer(
               if (localName == "this")
-                classLoader.loadClass(debugMetadata.className)
+                clazz.classLoader.loadClass(debugMetadata.className)
               else
                 compiledPersistableContinuationAnnotation.variables.single { it.name == localName }.type.java
             )
@@ -116,7 +115,7 @@ class ContinuationSerializer(
         }
         val debugMetadata = continuation.javaClass.getAnnotation(DebugMetadata::class.java)!!
         val compiledPersistableContinuationAnnotation =
-          classLoader.loadClass(debugMetadata.className).declaredMethods.single {
+          continuation.javaClass.classLoader.loadClass(debugMetadata.className).declaredMethods.single {
             it.name == debugMetadata.methodName
           }.getAnnotation(CompiledPersistableContinuation::class.java)
         rec((continuation as BaseContinuationImpl).completion!!)
@@ -137,7 +136,7 @@ class ContinuationSerializer(
             assert(field.trySetAccessible())
             val serializer = serializersModule.serializer(
               if (localName == "this")
-                classLoader.loadClass(debugMetadata.className)
+                continuation.javaClass.classLoader.loadClass(debugMetadata.className)
               else
                 compiledPersistableContinuationAnnotation.variables.single { it.name == localName }.type.java
             )

@@ -72,9 +72,7 @@ fun main() {
     }
   }
   val message = runBlocking {
-    (wrapper(
-      Main::class.java.classLoader, json, ClassLoaderClassSerializer(Main::class.java.classLoader)
-    )) @PersistableContinuation("main") {
+    (wrapper(json, ClassLoaderClassSerializer(Main::class.java.classLoader))) @PersistableContinuation("main") {
       @PersistencePoint("fooing") val fooing = Main().foo()
       "foo"
     }

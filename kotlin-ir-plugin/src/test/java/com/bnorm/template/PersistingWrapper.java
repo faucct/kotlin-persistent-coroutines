@@ -10,7 +10,6 @@ import kotlinx.serialization.KSerializer;
 import kotlinx.serialization.StringFormat;
 import org.jetbrains.annotations.NotNull;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
@@ -22,7 +21,7 @@ public class PersistingWrapper {
     private static final Path OUTPUT_PATH = Path.of("coroutine.tmp");
 
     public static Wrapper wrapper(
-            ClassLoader classLoader, StringFormat stringFormat, KSerializer<Class<?>> classSerializer
+            StringFormat stringFormat, KSerializer<Class<?>> classSerializer
     ) {
         return new Wrapper() {
             public <T> Object invoke(
@@ -31,7 +30,7 @@ public class PersistingWrapper {
             ) {
                 var persistedContinuation = new Continuation<T>() {
                     final ContinuationSerializer continuationSerializer = new ContinuationSerializer(
-                            classLoader, this, classSerializer
+                            this, classSerializer
                     );
                     final CoroutineContext coroutineContext = new Persistor() {
                         @Override
