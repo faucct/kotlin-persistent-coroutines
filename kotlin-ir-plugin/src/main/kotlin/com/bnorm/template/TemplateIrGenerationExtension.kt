@@ -146,8 +146,9 @@ class TemplateIrGenerationExtension(
                   symbol = compiledPersistableContinuationClass.constructors.single(),
                   type = compiledPersistableContinuationClass.defaultType,
                   typeArgumentsCount = 0,
-                  valueArgumentsCount = 2,
+                  valueArgumentsCount = 3,
                 )
+                compiledPersistableContinuation.putValueArgument(argument++, functionAnnotation.getValueArgument(0))
                 compiledPersistableContinuation.putValueArgument(
                   argument++, IrVarargImpl(
                     UNDEFINED_OFFSET, UNDEFINED_OFFSET,

@@ -71,8 +71,10 @@ fun main() {
       contextual(Main::class, SingletonKSerializer(main))
     }
   }
-  val message = runBlocking @PersistableContinuation {
-    (wrapper(Main::class.java.classLoader, json)) @PersistableContinuation {
+  val message = runBlocking {
+    (wrapper(
+      Main::class.java.classLoader, json, ClassLoaderClassSerializer(Main::class.java.classLoader)
+    )) @PersistableContinuation("main") {
       @PersistencePoint("fooing") val fooing = Main().foo()
       "foo"
     }

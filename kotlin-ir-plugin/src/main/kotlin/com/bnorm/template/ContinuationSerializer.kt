@@ -19,7 +19,8 @@ import kotlin.coroutines.jvm.internal.DebugMetadata
 
 @OptIn(ExperimentalSerializationApi::class, InternalSerializationApi::class)
 class ContinuationSerializer(
-  private val classLoader: ClassLoader, private val rootContinuation: Continuation<*>
+  private val classLoader: ClassLoader, private val rootContinuation: Continuation<*>,
+  private val classSerializer: KSerializer<Class<*>> = ClassLoaderClassSerializer(classLoader),
 ) : KSerializer<Continuation<*>> {
   companion object {
     val continuationDescriptor = buildSerialDescriptor(
@@ -57,8 +58,7 @@ class ContinuationSerializer(
       while (decodeElementIndex(descriptor) != CompositeDecoder.DECODE_DONE) {
         decodeInlineElement(descriptor, 0).decodeStructure(descriptor) {
           assert(decodeSerializableElement(descriptor, decodeElementIndex(descriptor), StringSerializer) == "type")
-          val type = decodeSerializableElement(descriptor, decodeElementIndex(descriptor), StringSerializer)
-          val clazz = classLoader.loadClass(type)
+          val clazz = decodeSerializableElement(descriptor, decodeElementIndex(descriptor), classSerializer)
           val constructor = clazz.declaredConstructors.single()
           assert(constructor.trySetAccessible())
           delegate = constructor.newInstance(*(constructor.parameters.dropLast(1).map { parameter ->
@@ -129,7 +129,7 @@ class ContinuationSerializer(
         encodeInlineElement(descriptor, 0).encodeStructure(descriptor) {
           var index = 0
           encodeStringElement(descriptor, index++, "type")
-          encodeStringElement(descriptor, index++, continuation::class.java.typeName)
+          encodeSerializableElement(descriptor, index++, classSerializer, continuation.javaClass)
           encodeStringElement(descriptor, index++, "label")
           encodeStringElement(descriptor, index++, persistencePoint.serialized)
           forEachSpilledLocalNameAndField(debugMetadata, label) { localName, spilled ->

@@ -23,7 +23,11 @@ import com.tschuchort.compiletesting.SourceFile
 import org.jetbrains.kotlin.compiler.plugin.CompilerPluginRegistrar
 import kotlin.test.assertEquals
 import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
+import org.jetbrains.kotlin.utils.addToStdlib.cast
+import org.jetbrains.org.objectweb.asm.*
 import org.junit.Test
+import java.io.FileInputStream
+import java.io.FileOutputStream
 
 class IrPluginTest {
   @Test
@@ -54,10 +58,9 @@ fun debug() = "Hello, World!"
   import com.bnorm.template.PersistableContinuation
   import com.bnorm.template.PersistedField
   import com.bnorm.template.PersistencePoint
-  import com.bnorm.template.Typed
   import javaslang.Tuple3
 
-  @PersistableContinuation
+  @PersistableContinuation("bookTrip")
   suspend fun bookTrip(@PersistedField name: String) {
     @PersistedField val carReservationID = Random().nextInt()
     @PersistencePoint("a") val a = delay(0)
@@ -109,26 +112,32 @@ import kotlinx.serialization.modules.SerializersModule
 import kotlinx.serialization.serializer
 import kotlin.coroutines.coroutineContext
 import java.util.*
+import com.bnorm.template.AnonymousClasses
+import com.bnorm.template.MapClassSerializerFactory
 import com.bnorm.template.PersistableContinuation
 import com.bnorm.template.PersistedField
 import com.bnorm.template.PersistencePoint
+import com.bnorm.template.FunctionContinuation
 
-var persisting = false
-@PersistableContinuation
-suspend fun persist() {
-  persisting = true
-  @PersistencePoint("persist") val persist = coroutineContext[Persistor]!!.persist()
-  if (persisting) {
-    throw RuntimeException("")
-  }
+object Persist {
+    var persisting = false
+    @JvmStatic
+    @PersistableContinuation("persist")
+    suspend fun persist() {
+      persisting = true
+      @PersistencePoint("persist") val persist = coroutineContext[Persistor]!!.persist()
+      if (persisting) {
+        throw RuntimeException("")
+      }
+    }
 }
 
 class Main {
-  @PersistableContinuation
+  @PersistableContinuation("foo")
   suspend fun foo() {
     @PersistedField val a = "a"
     println("hi")
-    @PersistencePoint("barring") val barring = persist()
+    @PersistencePoint("barring") val barring = Persist.persist()
     @PersistencePoint("delaying") val delaying = bar()
     println("then ${'$'}a")
     delay(1000)
@@ -136,10 +145,10 @@ class Main {
     println("later")
   }
 
-  @PersistableContinuation
+  @PersistableContinuation("bar")
   suspend fun bar() {
     println("bar")
-    @PersistencePoint("delaying") val delaying = persist()
+    @PersistencePoint("delaying") val delaying = Persist.persist()
     println("then")
     delay(1000)
     yield()
@@ -147,13 +156,13 @@ class Main {
   }
 
   suspend fun supplier(): Int {
-    persist()
+    Persist.persist()
     return 0
   }
 
   suspend fun consumer(a: Int, b: Int) {
     println("bar")
-    persist()
+    Persist.persist()
     println("then")
     delay(1000)
     yield()
@@ -170,15 +179,16 @@ class Main {
   companion object {
     @JvmStatic
     fun main() {
-      Json.encodeToString(Json.serializersModule.serializer(), Color(1, 2))
       val main = Main()
       val json = Json {
         serializersModule = SerializersModule {
           contextual(Main::class, SingletonKSerializer(main))
         }
       }
-      val message = runBlocking @PersistableContinuation {
-        (wrapper(Main::class.java.classLoader, json)) @PersistableContinuation {
+      val message = runBlocking {
+        (wrapper(
+            Main::class.java.classLoader, json, MapClassSerializerFactory.invoke(Main::class, Persist::class)
+        )) @PersistableContinuation("main") {
           @PersistencePoint("fooing") val fooing = Main().foo()
           "foo"
         }
@@ -191,6 +201,139 @@ class Main {
       )
     )
     assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode)
+    val methodsContinuations = HashMap<Triple<String?, String?, String?>, Type>()
+    val outerClasses = HashMap<String, Triple<String?, String?, String?>>()
+    val persistableContinuationClasses = HashSet<String>()
+    val methodsDescriptors = HashMap<Pair<String, String?>, HashSet<String?>>()
+    for (compiledClassAndResourceFile in result.compiledClassAndResourceFiles) {
+      if (compiledClassAndResourceFile.extension == "class") {
+        val classReader = ClassReader(FileInputStream(compiledClassAndResourceFile).use { it.readAllBytes() })
+        classReader.accept(object : ClassVisitor(Opcodes.ASM4) {
+          var outerClass: Triple<String?, String?, String?>? = null
+          override fun visitOuterClass(owner: String?, name: String?, descriptor: String?) {
+            val outerClass = Triple(owner, name, descriptor)
+            this.outerClass = outerClass
+            val className = classReader.className
+            if (className != null) {
+              outerClasses[className] = outerClass
+            }
+            super.visitOuterClass(owner, name, descriptor)
+          }
+
+          override fun visitAnnotation(descriptor: String?, visible: Boolean): AnnotationVisitor? {
+            if (descriptor == "Lkotlin/coroutines/jvm/internal/DebugMetadata;") {
+              return object : AnnotationVisitor(Opcodes.ASM4, super.visitAnnotation(descriptor, visible)) {
+                lateinit var clazz: String
+                lateinit var method: String
+                override fun visit(name: String?, value: Any?) {
+                  when (name) {
+                    "m" -> {
+                      method = value.cast()
+                      if (value != outerClass?.second) {
+                        outerClass = null
+                      }
+                    }
+                    "c" -> {
+                      clazz = value.cast()
+                      if (value != outerClass?.first) {
+                        outerClass = null
+                      }
+                    }
+                    else -> {}
+                  }
+                  super.visit(name, value)
+                }
+
+                override fun visitEnd() {
+                  methodsContinuations[outerClass ?: Triple(clazz, method, null)] = Type.getObjectType(
+                    classReader.className.replace('.', '/')
+                  )
+                  super.visitEnd()
+                }
+              }
+            }
+            return super.visitAnnotation(descriptor, visible)
+          }
+
+          override fun visitMethod(
+            access: Int,
+            name: String?,
+            descriptor: String?,
+            signature: String?,
+            exceptions: Array<out String>?,
+          ): MethodVisitor {
+            methodsDescriptors.getOrPut(Pair(classReader.className, name)) { HashSet() }.add(descriptor)
+            return object : MethodVisitor(
+              Opcodes.ASM4, super.visitMethod(access, name, descriptor, signature, exceptions)
+            ) {
+              override fun visitAnnotation(descriptor: String?, visible: Boolean): AnnotationVisitor? {
+                if (descriptor == "Lcom/bnorm/template/CompiledPersistableContinuation;") {
+                  persistableContinuationClasses.add(classReader.className)
+                }
+                return super.visitAnnotation(descriptor, visible)
+              }
+            }
+          }
+        }, 0)
+      }
+    }
+    for (method in methodsContinuations.keys.filter { it.third == null }) {
+      methodsContinuations[method.copy(third = methodsDescriptors[Pair(method.first, method.second)]!!.single())] =
+        methodsContinuations.remove(method)!!
+    }
+    val outerClassesAnonymousClasses = HashMap<Triple<String?, String?, String?>, HashSet<String>>()
+    fun rec(className: String) {
+      val outerClass = outerClasses[className]
+      if (outerClass != null) {
+        val absent = HashSet<String>()
+        val prev = outerClassesAnonymousClasses.putIfAbsent(outerClass, absent)
+        (prev ?: absent).add(className)
+        if (prev == null) {
+          rec(outerClass.first!!)
+        }
+      }
+    }
+    persistableContinuationClasses.forEach { rec(it) }
+    for (compiledClassAndResourceFile in result.compiledClassAndResourceFiles) {
+      if (compiledClassAndResourceFile.extension == "class") {
+        val classReader = ClassReader(FileInputStream(compiledClassAndResourceFile).use { it.readAllBytes() })
+        val classWriter = ClassWriter(0)
+        classReader.accept(object : ClassVisitor(Opcodes.ASM4, classWriter) {
+          override fun visitMethod(
+            access: Int,
+            name: String?,
+            descriptor: String?,
+            signature: String?,
+            exceptions: Array<out String>?,
+          ): MethodVisitor {
+            val methodDescriptor = Triple(classReader.className, name, descriptor)
+            val methodVisitor = super.visitMethod(access, name, descriptor, signature, exceptions)
+            val continuationClass = methodsContinuations.remove(methodDescriptor)
+            if (continuationClass != null) {
+              val annotationVisitor = methodVisitor.visitAnnotation(
+                "Lcom/bnorm/template/FunctionContinuation;", true
+              )
+              annotationVisitor.visit("value", continuationClass)
+              annotationVisitor.visitEnd()
+            }
+            val anonymousClasses = outerClassesAnonymousClasses.remove(methodDescriptor)
+            if (anonymousClasses != null) {
+              val annotationVisitor = methodVisitor.visitAnnotation("Lcom/bnorm/template/AnonymousClasses;", true)
+              val arrayVisitor = annotationVisitor.visitArray("v")
+              anonymousClasses.forEach {
+                arrayVisitor.visit(null, Type.getObjectType(it.replace('.', '/')))
+              }
+              arrayVisitor.visitEnd()
+              annotationVisitor.visitEnd()
+            }
+            return methodVisitor
+          }
+        }, 0)
+        FileOutputStream(compiledClassAndResourceFile).use { it.write(classWriter.toByteArray()) }
+      }
+    }
+    assert(outerClassesAnonymousClasses.isEmpty())
+    assert(methodsContinuations.isEmpty())
     println(result.classLoader.loadClass("Main").getDeclaredMethod("main").invoke(null))
   }
 }

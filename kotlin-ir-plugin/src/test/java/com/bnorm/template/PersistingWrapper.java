@@ -6,97 +6,85 @@ import kotlin.coroutines.CoroutineContext;
 import kotlin.jvm.functions.Function1;
 import kotlinx.coroutines.CancellableContinuation;
 import kotlinx.coroutines.CancellableContinuationKt;
+import kotlinx.serialization.KSerializer;
 import kotlinx.serialization.StringFormat;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.concurrent.atomic.AtomicReference;
 
 public class PersistingWrapper {
     private static final Path STATE_PATH = Path.of("coroutine");
     private static final Path OUTPUT_PATH = Path.of("coroutine.tmp");
 
-    private static class PersistedContinuation<T> implements Continuation<T> {
-        private final Continuation<? super T> continuation;
-        private final CoroutineContext coroutineContext;
-
-        private PersistedContinuation(ClassLoader classLoader, StringFormat stringFormat, Continuation<? super T> continuation) {
-            this.continuation = continuation;
-            coroutineContext = new PersistingCoroutineContext<>(classLoader, stringFormat, this).plus(continuation.getContext());
-        }
-
-        @NotNull
-        @Override
-        public CoroutineContext getContext() {
-            return coroutineContext;
-        }
-
-        @Override
-        public void resumeWith(@NotNull Object o) {
-            continuation.resumeWith(o);
-        }
-    }
-
-    public static class PersistingCoroutineContext<T> extends Persistor {
-        private final ClassLoader classLoader;
-        private final StringFormat stringFormat;
-        private final PersistedContinuation<T> persistedContinuation;
-
-        public PersistingCoroutineContext(ClassLoader classLoader, StringFormat stringFormat, PersistedContinuation<T> persistedContinuation) {
-            this.classLoader = classLoader;
-            this.stringFormat = stringFormat;
-            this.persistedContinuation = persistedContinuation;
-        }
-
-        @Nullable
-        @Override
-        public Object persist(@NotNull Continuation<? super Unit> $completion) {
-            try {
-                try (var output = Files.newOutputStream(OUTPUT_PATH)) {
-                    output.write(stringFormat.encodeToString(
-                            new ContinuationSerializer(classLoader, persistedContinuation),
-                            (Continuation<? super Object>) $completion
-                    ).getBytes());
-                }
-                Files.move(OUTPUT_PATH, STATE_PATH, StandardCopyOption.ATOMIC_MOVE);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            return Unit.INSTANCE;
-        }
-    }
-
-    public static Wrapper wrapper(ClassLoader classLoader, StringFormat stringFormat) {
+    public static Wrapper wrapper(
+            ClassLoader classLoader, StringFormat stringFormat, KSerializer<Class<?>> classSerializer
+    ) {
         return new Wrapper() {
             public <T> Object invoke(
                     @NotNull Function1<? super Continuation<? super T>, ?> function1,
                     @NotNull Continuation<? super T> continuation
             ) {
-                PersistedContinuation<T> persistedContinuation = new PersistedContinuation<>(classLoader, stringFormat, continuation);
-                if (Files.exists(STATE_PATH)) {
-                    try (var input = Files.newInputStream(STATE_PATH)) {
-                        var cancellableContinuationReference = new AtomicReference<CancellableContinuation<? super Unit>>();
-                        Object coroutineSuspended = CancellableContinuationKt.suspendCancellableCoroutine(
-                                cancellableContinuation -> {
-                                    cancellableContinuationReference.set(cancellableContinuation);
-                                    return Unit.INSTANCE;
-                                },
-                                (Continuation<Unit>) (Continuation<?>) stringFormat.decodeFromString(
-                                        new ContinuationSerializer(classLoader, persistedContinuation),
+                var persistedContinuation = new Continuation<T>() {
+                    final ContinuationSerializer continuationSerializer = new ContinuationSerializer(
+                            classLoader, this, classSerializer
+                    );
+                    final CoroutineContext coroutineContext = new Persistor() {
+                        @Override
+                        public Object persist(@NotNull Continuation<? super Unit> $completion) {
+                            try {
+                                try (var output = Files.newOutputStream(OUTPUT_PATH)) {
+                                    output.write(stringFormat.encodeToString(continuationSerializer, $completion).getBytes());
+                                }
+                                Files.move(OUTPUT_PATH, STATE_PATH, StandardCopyOption.ATOMIC_MOVE);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                            return Unit.INSTANCE;
+                        }
+                    }.plus(continuation.getContext());
+
+                    @NotNull
+                    @Override
+                    public CoroutineContext getContext() {
+                        return coroutineContext;
+                    }
+
+                    @Override
+                    public void resumeWith(@NotNull Object o) {
+                        continuation.resumeWith(o);
+                    }
+                };
+                try (var input = Files.newInputStream(STATE_PATH)) {
+                    return new Function1<CancellableContinuation<? super Unit>, Unit>() {
+                        CancellableContinuation<? super Unit> invoked;
+                        final Object coroutineSuspended = CancellableContinuationKt.suspendCancellableCoroutine(
+                                this,
+                                (Continuation<Unit>) stringFormat.decodeFromString(
+                                        persistedContinuation.continuationSerializer,
                                         new String(input.readAllBytes())
                                 )
                         );
-                        cancellableContinuationReference.get().resume(Unit.INSTANCE, null);
-                        return coroutineSuspended;
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
+
+                        {
+                            invoked.resume(Unit.INSTANCE, null);
+                        }
+
+                        @Override
+                        public Unit invoke(CancellableContinuation<? super Unit> cancellableContinuation) {
+                            invoked = cancellableContinuation;
+                            return Unit.INSTANCE;
+                        }
+                    }.coroutineSuspended;
+                } catch (NoSuchFileException ignored) {
+                    return function1.invoke(persistedContinuation);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
                 }
-                return function1.invoke(persistedContinuation);
             }
         };
     }
