@@ -26,10 +26,10 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 import org.jetbrains.kotlin.utils.addToStdlib.cast
 import org.jetbrains.org.objectweb.asm.*
 import org.junit.Test
+import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.file.Files
-import java.nio.file.Path
 import kotlin.io.path.deleteExisting
 import kotlin.io.path.deleteIfExists
 
@@ -102,115 +102,8 @@ fun debug() = "Hello, World!"
   @Test
   fun `IR plugin success3`() {
     val result = compile(
-      sourceFile = SourceFile.kotlin(
-        "Script.kt", """
-import com.bnorm.template.Color
-import com.bnorm.template.PersistingWrapper.wrapper
-import com.bnorm.template.Persistor
-import com.bnorm.template.SingletonKSerializer
-import kotlinx.coroutines.*
-import kotlin.coroutines.Continuation
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.modules.SerializersModule
-import kotlinx.serialization.serializer
-import kotlin.coroutines.coroutineContext
-import java.nio.file.Path
-import java.util.*
-import com.bnorm.template.AnonymousClasses
-import com.bnorm.template.DisposableCoroutine
-import com.bnorm.template.Dispose
-import com.bnorm.template.MapClassSerializerFactory
-import com.bnorm.template.PersistableContinuation
-import com.bnorm.template.PersistedField
-import com.bnorm.template.PersistedString
-import com.bnorm.template.PersistencePoint
-import com.bnorm.template.FunctionContinuation
-
-object Persist {
-    var persisting = false
-
-    @JvmStatic
-    @PersistableContinuation("persist")
-    suspend fun persist() {
-      persisting = true
-      @PersistencePoint("persist") val persist = coroutineContext[Persistor]!!.persist()
-      if (persisting) {
-        persisting = false
-        try {
-          coroutineContext[Dispose]!!.dispose()
-        } finally {
-          println("NOPE")
-        }
-      }
-    }
-}
-
-class Main {
-  @PersistableContinuation("foo")
-  suspend fun foo() {
-    @PersistedField val a = "a"
-    println("hi")
-    @PersistencePoint("barring") val barring = Persist.persist()
-    @PersistencePoint("delaying") val delaying = bar()
-    println("then ${'$'}a")
-    delay(1000)
-    yield()
-    println("later")
-  }
-
-  @PersistableContinuation("bar")
-  suspend fun bar() {
-    println("bar")
-    @PersistencePoint("delaying") val delaying = Persist.persist()
-    println("then")
-    delay(1000)
-    yield()
-    println("later")
-  }
-
-  suspend fun supplier(): Int {
-    Persist.persist()
-    return 0
-  }
-
-  suspend fun consumer(a: Int, b: Int) {
-    println("bar")
-    Persist.persist()
-    println("then")
-    delay(1000)
-    yield()
-    println("later")
-  }
-
-  suspend fun supplierConsumer() {
-    consumer(
-      Random().nextInt(),
-      supplier(),
-    )
-  }
-
-  companion object {
-    @JvmStatic
-    fun main(persistedString: PersistedString) {
-      val main = Main()
-      val json = Json {
-        serializersModule = SerializersModule {
-          contextual(Main::class, SingletonKSerializer(main))
-        }
-      }
-      val disposableCoroutine = DisposableCoroutine()
-      runBlocking(disposableCoroutine) {
-        disposableCoroutine {
-          (wrapper(json, MapClassSerializerFactory.invoke(Main::class, Persist::class), persistedString)) @PersistableContinuation("main") {
-            @PersistencePoint("fooing") val fooing = Main().foo()
-            println("foo")
-          }
-        }
-      }
-    }
-  }
-}
-"""
+      sourceFile = SourceFile.fromPath(
+        File("/Users/faucct/Code/kotlin-persistent-coroutines/kotlin-ir-plugin/src/test/resources/Test3.kt")
       )
     )
     assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode)
@@ -350,7 +243,7 @@ class Main {
     }
     assert(outerClassesAnonymousClasses.isEmpty())
     assert(methodsContinuations.isEmpty())
-    val declaredMethod = result.classLoader.loadClass("Main").getDeclaredMethod("main", PersistedString::class.java)
+    val declaredMethod = result.classLoader.loadClass("Test3").getDeclaredMethod("main", PersistedString::class.java)
     val stringPersistedToFile = StringPersistedToFile(Files.createTempFile(null, null))
     stringPersistedToFile.path.deleteExisting()
     AutoCloseable {
