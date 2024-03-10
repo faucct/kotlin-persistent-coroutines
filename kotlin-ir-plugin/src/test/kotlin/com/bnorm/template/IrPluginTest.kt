@@ -190,6 +190,7 @@ fun debug() = "Hello, World!"
       methodsContinuations[method.copy(third = methodsDescriptors[Pair(method.first, method.second)]!!.single())] =
         methodsContinuations.remove(method)!!
     }
+
     val outerClassesAnonymousClasses = HashMap<Triple<String?, String?, String?>, HashSet<String>>()
     fun rec(className: String) {
       val outerClass = outerClasses[className]
@@ -203,6 +204,7 @@ fun debug() = "Hello, World!"
       }
     }
     persistableContinuationClasses.forEach { rec(it) }
+
     for (compiledClassAndResourceFile in result.compiledClassAndResourceFiles) {
       if (compiledClassAndResourceFile.extension == "class") {
         val classReader = ClassReader(FileInputStream(compiledClassAndResourceFile).use { it.readAllBytes() })
@@ -243,17 +245,35 @@ fun debug() = "Hello, World!"
     }
     assert(outerClassesAnonymousClasses.isEmpty())
     assert(methodsContinuations.isEmpty())
+
     val declaredMethod = result.classLoader.loadClass("Test3").getDeclaredMethod("main", PersistedString::class.java)
     val stringPersistedToFile = StringPersistedToFile(Files.createTempFile(null, null))
     stringPersistedToFile.path.deleteExisting()
+
     AutoCloseable {
       stringPersistedToFile.path.deleteIfExists()
       stringPersistedToFile.tmpPath.deleteIfExists()
     }.use {
       declaredMethod.invoke(null, stringPersistedToFile)
+      assertEquals(
+        """[{"type":"main","label":"fooing"},{"type":"foo","label":"barring","a":"a"},{"type":"persist","label":"persist"}]""",
+        Files.newInputStream(stringPersistedToFile.path).use { String(it.readAllBytes()) },
+      )
       declaredMethod.invoke(null, stringPersistedToFile)
+      assertEquals(
+        """[{"type":"main","label":"fooing"},{"type":"foo","label":"delaying","a":"a"},{"type":"bar","label":"delaying"},{"type":"persist","label":"persist"}]""",
+        Files.newInputStream(stringPersistedToFile.path).use { String(it.readAllBytes()) },
+      )
       declaredMethod.invoke(null, stringPersistedToFile)
+      assertEquals(
+        """[{"type":"main","label":"done"},{"type":"persist","label":"persist"}]""",
+        Files.newInputStream(stringPersistedToFile.path).use { String(it.readAllBytes()) },
+      )
       declaredMethod.invoke(null, stringPersistedToFile)
+      assertEquals(
+        """[{"type":"main","label":"done"},{"type":"persist","label":"persist"}]""",
+        Files.newInputStream(stringPersistedToFile.path).use { String(it.readAllBytes()) },
+      )
     }
   }
 }

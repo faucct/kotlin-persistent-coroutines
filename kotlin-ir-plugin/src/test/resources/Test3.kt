@@ -85,7 +85,8 @@ class Test3 {
         disposableCoroutine {
           (wrapper(json, MapClassSerializerFactory.invoke(Test3::class), persistedString)) @PersistableContinuation("main") {
             @PersistencePoint("fooing") val fooing = Test3().foo()
-            println("foo")
+            @PersistencePoint("done") val done = persist()
+            println("done")
           }
         }
       }
