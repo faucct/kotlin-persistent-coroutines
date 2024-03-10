@@ -101,11 +101,7 @@ fun debug() = "Hello, World!"
 
   @Test
   fun `IR plugin success3`() {
-    val result = compile(
-      sourceFile = SourceFile.fromPath(
-        File("/Users/faucct/Code/kotlin-persistent-coroutines/kotlin-ir-plugin/src/test/resources/Test3.kt")
-      )
-    )
+    val result = compile(SourceFile.fromPath(File(javaClass.getResource("/Test3.kt")!!.file)))
     assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode)
     val methodsContinuations = HashMap<Triple<String?, String?, String?>, Type>()
     val outerClasses = HashMap<String, Triple<String?, String?, String?>>()
