@@ -133,22 +133,27 @@ class ContinuationSerializer(
           encodeStringElement(descriptor, index++, "label")
           encodeStringElement(descriptor, index++, persistencePoint.serialized)
           forEachSpilledLocalNameAndField(debugMetadata, label) { localName, spilled ->
-            val field = continuation.javaClass.getDeclaredField(spilled)
-            assert(field.trySetAccessible())
-            val serializer = serializersModule.serializer(
-              if (localName == "this")
-                continuation.javaClass.classLoader.loadClass(debugMetadata.className)
-              else
-                compiledPersistableContinuationAnnotation.variables.single { it.name == localName }.type.java
-            )
-            if (serializer !is SingletonKSerializer) {
-              encodeStringElement(descriptor, index++, localName)
-              encodeSerializableElement(
-                descriptor,
-                index++,
-                serializer,
-                field.get(continuation)
+            try {
+              val field = continuation.javaClass.getDeclaredField(spilled)
+              assert(field.trySetAccessible())
+              val serializer = serializersModule.serializer(
+                if (localName == "this")
+                  continuation.javaClass.classLoader.loadClass(debugMetadata.className)
+                else
+                  compiledPersistableContinuationAnnotation.variables.single { it.name == localName }.type.java
               )
+              if (serializer !is SingletonKSerializer) {
+                encodeStringElement(descriptor, index++, localName)
+                encodeSerializableElement(
+                  descriptor,
+                  index++,
+                  serializer,
+                  field.get(continuation)
+                )
+              }
+            } catch (e: Exception) {
+              println("$localName -> $spilled")
+              throw e
             }
           }
         }
