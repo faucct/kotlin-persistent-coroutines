@@ -9,7 +9,7 @@ import java.util.*
 import kotlin.coroutines.coroutineContext
 
 @Suppress("unused")
-class Test3 {
+class UserCode {
   @PersistableContinuation("foo")
   suspend fun foo() {
     @PersistedField val a = "a"
@@ -73,18 +73,18 @@ class Test3 {
 
     @JvmStatic
     fun main(persistedString: PersistedString) {
-      val main = Test3()
+      val main = UserCode()
       val json = Json {
         serializersModule = SerializersModule {
-          contextual(Test3::class, SingletonKSerializer(main))
+          contextual(UserCode::class, SingletonKSerializer(main))
           contextual(Companion::class, SingletonKSerializer(Companion))
         }
       }
       val disposableCoroutine = DisposableCoroutine()
       runBlocking(disposableCoroutine) {
         disposableCoroutine {
-          (wrapper(json, MapClassSerializerFactory.invoke(Test3::class), persistedString)) @PersistableContinuation("main") {
-            @PersistencePoint("fooing") val fooing = Test3().foo()
+          (wrapper(json, MapClassSerializerFactory.invoke(UserCode::class), persistedString)) @PersistableContinuation("main") {
+            @PersistencePoint("fooing") val fooing = UserCode().foo()
             @PersistencePoint("done") val done = persist()
             println("done")
           }
