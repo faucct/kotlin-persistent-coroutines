@@ -13,8 +13,9 @@ import kotlinx.serialization.encoding.*
 import kotlinx.serialization.internal.PrimitiveSerialDescriptor
 import kotlinx.serialization.internal.StringSerializer
 import kotlinx.serialization.serializer
+import org.jetbrains.kotlin.utils.addToStdlib.cast
 import kotlin.coroutines.Continuation
-import kotlin.coroutines.jvm.internal.BaseContinuationImpl
+import kotlin.coroutines.jvm.internal.CoroutineStackFrame
 import kotlin.coroutines.jvm.internal.DebugMetadata
 
 @OptIn(ExperimentalSerializationApi::class, InternalSerializationApi::class)
@@ -118,7 +119,7 @@ class ContinuationSerializer(
           continuation.javaClass.classLoader.loadClass(debugMetadata.className).declaredMethods.single {
             it.name == debugMetadata.methodName
           }.getAnnotation(CompiledPersistableContinuation::class.java)
-        rec((continuation as BaseContinuationImpl).completion!!)
+        rec((continuation as CoroutineStackFrame).callerFrame.cast())
         val labelField = continuation.javaClass.getDeclaredField("label")
         assert(labelField.trySetAccessible())
         val label = labelField.getInt(continuation)

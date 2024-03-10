@@ -28,6 +28,10 @@ import org.jetbrains.org.objectweb.asm.*
 import org.junit.Test
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.nio.file.Files
+import java.nio.file.Path
+import kotlin.io.path.deleteExisting
+import kotlin.io.path.deleteIfExists
 
 class IrPluginTest {
   @Test
@@ -99,35 +103,44 @@ fun debug() = "Hello, World!"
   fun `IR plugin success3`() {
     val result = compile(
       sourceFile = SourceFile.kotlin(
-        "Main.kt", """
+        "Script.kt", """
 import com.bnorm.template.Color
 import com.bnorm.template.PersistingWrapper.wrapper
 import com.bnorm.template.Persistor
 import com.bnorm.template.SingletonKSerializer
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.yield
+import kotlinx.coroutines.*
+import kotlin.coroutines.Continuation
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.modules.SerializersModule
 import kotlinx.serialization.serializer
 import kotlin.coroutines.coroutineContext
+import java.nio.file.Path
 import java.util.*
 import com.bnorm.template.AnonymousClasses
+import com.bnorm.template.DisposableCoroutine
+import com.bnorm.template.Dispose
 import com.bnorm.template.MapClassSerializerFactory
 import com.bnorm.template.PersistableContinuation
 import com.bnorm.template.PersistedField
+import com.bnorm.template.PersistedString
 import com.bnorm.template.PersistencePoint
 import com.bnorm.template.FunctionContinuation
 
 object Persist {
     var persisting = false
+
     @JvmStatic
     @PersistableContinuation("persist")
     suspend fun persist() {
       persisting = true
       @PersistencePoint("persist") val persist = coroutineContext[Persistor]!!.persist()
       if (persisting) {
-        throw RuntimeException("")
+        persisting = false
+        try {
+          coroutineContext[Dispose]!!.dispose()
+        } finally {
+          println("NOPE")
+        }
       }
     }
 }
@@ -178,20 +191,22 @@ class Main {
 
   companion object {
     @JvmStatic
-    fun main() {
+    fun main(persistedString: PersistedString) {
       val main = Main()
       val json = Json {
         serializersModule = SerializersModule {
           contextual(Main::class, SingletonKSerializer(main))
         }
       }
-      val message = runBlocking {
-        (wrapper(json, MapClassSerializerFactory.invoke(Main::class, Persist::class))) @PersistableContinuation("main") {
-          @PersistencePoint("fooing") val fooing = Main().foo()
-          "foo"
+      val disposableCoroutine = DisposableCoroutine()
+      runBlocking(disposableCoroutine) {
+        disposableCoroutine {
+          (wrapper(json, MapClassSerializerFactory.invoke(Main::class, Persist::class), persistedString)) @PersistableContinuation("main") {
+            @PersistencePoint("fooing") val fooing = Main().foo()
+            println("foo")
+          }
         }
       }
-      println(message)
     }
   }
 }
@@ -206,8 +221,9 @@ class Main {
     for (compiledClassAndResourceFile in result.compiledClassAndResourceFiles) {
       if (compiledClassAndResourceFile.extension == "class") {
         val classReader = ClassReader(FileInputStream(compiledClassAndResourceFile).use { it.readAllBytes() })
-        classReader.accept(object : ClassVisitor(Opcodes.ASM4) {
+        classReader.accept(object : ClassVisitor(Opcodes.ASM5) {
           var outerClass: Triple<String?, String?, String?>? = null
+
           override fun visitOuterClass(owner: String?, name: String?, descriptor: String?) {
             val outerClass = Triple(owner, name, descriptor)
             this.outerClass = outerClass
@@ -220,7 +236,7 @@ class Main {
 
           override fun visitAnnotation(descriptor: String?, visible: Boolean): AnnotationVisitor? {
             if (descriptor == "Lkotlin/coroutines/jvm/internal/DebugMetadata;") {
-              return object : AnnotationVisitor(Opcodes.ASM4, super.visitAnnotation(descriptor, visible)) {
+              return object : AnnotationVisitor(Opcodes.ASM5, super.visitAnnotation(descriptor, visible)) {
                 lateinit var clazz: String
                 lateinit var method: String
                 override fun visit(name: String?, value: Any?) {
@@ -231,12 +247,14 @@ class Main {
                         outerClass = null
                       }
                     }
+
                     "c" -> {
                       clazz = value.cast()
                       if (value != outerClass?.first) {
                         outerClass = null
                       }
                     }
+
                     else -> {}
                   }
                   super.visit(name, value)
@@ -262,7 +280,7 @@ class Main {
           ): MethodVisitor {
             methodsDescriptors.getOrPut(Pair(classReader.className, name)) { HashSet() }.add(descriptor)
             return object : MethodVisitor(
-              Opcodes.ASM4, super.visitMethod(access, name, descriptor, signature, exceptions)
+              Opcodes.ASM5, super.visitMethod(access, name, descriptor, signature, exceptions)
             ) {
               override fun visitAnnotation(descriptor: String?, visible: Boolean): AnnotationVisitor? {
                 if (descriptor == "Lcom/bnorm/template/CompiledPersistableContinuation;") {
@@ -296,7 +314,7 @@ class Main {
       if (compiledClassAndResourceFile.extension == "class") {
         val classReader = ClassReader(FileInputStream(compiledClassAndResourceFile).use { it.readAllBytes() })
         val classWriter = ClassWriter(0)
-        classReader.accept(object : ClassVisitor(Opcodes.ASM4, classWriter) {
+        classReader.accept(object : ClassVisitor(Opcodes.ASM5, classWriter) {
           override fun visitMethod(
             access: Int,
             name: String?,
@@ -332,7 +350,18 @@ class Main {
     }
     assert(outerClassesAnonymousClasses.isEmpty())
     assert(methodsContinuations.isEmpty())
-    println(result.classLoader.loadClass("Main").getDeclaredMethod("main").invoke(null))
+    val declaredMethod = result.classLoader.loadClass("Main").getDeclaredMethod("main", PersistedString::class.java)
+    val stringPersistedToFile = StringPersistedToFile(Files.createTempFile(null, null))
+    stringPersistedToFile.path.deleteExisting()
+    AutoCloseable {
+      stringPersistedToFile.path.deleteIfExists()
+      stringPersistedToFile.tmpPath.deleteIfExists()
+    }.use {
+      declaredMethod.invoke(null, stringPersistedToFile)
+      declaredMethod.invoke(null, stringPersistedToFile)
+      declaredMethod.invoke(null, stringPersistedToFile)
+      declaredMethod.invoke(null, stringPersistedToFile)
+    }
   }
 }
 

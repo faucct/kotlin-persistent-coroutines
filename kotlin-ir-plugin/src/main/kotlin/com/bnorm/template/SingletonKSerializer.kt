@@ -8,7 +8,7 @@ class SingletonKSerializer<T>(val t: T) : kotlinx.serialization.KSerializer<T> {
   override val descriptor: SerialDescriptor
     get() = throw UnsupportedOperationException()
 
-  override fun deserialize(decoder: Decoder): T = throw UnsupportedOperationException()
+  override fun deserialize(decoder: Decoder): T = t
 
   override fun serialize(encoder: Encoder, value: T) = throw UnsupportedOperationException()
 }

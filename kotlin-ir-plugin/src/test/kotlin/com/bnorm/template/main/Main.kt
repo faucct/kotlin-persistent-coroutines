@@ -4,10 +4,12 @@ import com.bnorm.template.*
 import com.bnorm.template.PersistingWrapper.wrapper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.modules.SerializersModule
 import kotlinx.serialization.serializer
+import java.nio.file.Path
 import kotlin.coroutines.coroutineContext
 import java.util.*
 
@@ -72,7 +74,11 @@ fun main() {
     }
   }
   val message = runBlocking {
-    (wrapper(json, ClassLoaderClassSerializer(Main::class.java.classLoader))) @PersistableContinuation("main") {
+    (wrapper(
+      json,
+      ClassLoaderClassSerializer(Main::class.java.classLoader),
+      StringPersistedToFile(Path.of("continuation")),
+    )) @PersistableContinuation("main") {
       @PersistencePoint("fooing") val fooing = Main().foo()
       "foo"
     }

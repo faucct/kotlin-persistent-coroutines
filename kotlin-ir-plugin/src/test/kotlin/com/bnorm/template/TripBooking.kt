@@ -2,11 +2,9 @@ package com.bnorm.template
 
 import com.bnorm.template.PersistingWrapper.wrapper
 import javaslang.Tuple3
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import kotlinx.serialization.json.Json
+import java.nio.file.Path
 import java.util.*
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.coroutineContext
@@ -23,7 +21,16 @@ object TripBooking {
 
   @JvmStatic
   fun main(args: Array<String>) {
-    println(Arrays.toString(TripBooking::class.java.getMethod("bookTrip", String::class.java, Int::class.java, Continuation::class.java).annotations))
+    println(
+      Arrays.toString(
+        TripBooking::class.java.getMethod(
+          "bookTrip",
+          String::class.java,
+          Int::class.java,
+          Continuation::class.java
+        ).annotations
+      )
+    )
 //    val bookTrip = ClassLoader.getSystemClassLoader().loadClass("com.bnorm.template.TripBooking\$bookTrip\$1")
 //    for (annotation in bookTrip.annotations) {
 //      println(annotation)
@@ -35,7 +42,11 @@ object TripBooking {
 //      }
 //    }
     runBlocking {
-      (wrapper(Json.Default, ClassLoaderClassSerializer(ClassLoader.getSystemClassLoader()))) {
+      (wrapper(
+        Json.Default,
+        ClassLoaderClassSerializer(ClassLoader.getSystemClassLoader()),
+        StringPersistedToFile(Path.of("continuation")),
+      )) {
         bookTrip("name")
         println("done")
       }
