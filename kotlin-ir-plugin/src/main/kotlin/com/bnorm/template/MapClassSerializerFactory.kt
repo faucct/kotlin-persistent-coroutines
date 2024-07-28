@@ -4,7 +4,7 @@ import kotlinx.serialization.KSerializer
 import kotlin.reflect.KClass
 
 object MapClassSerializerFactory {
-  fun invoke(vararg classes: KClass<*>): KSerializer<Class<*>> {
+  operator fun invoke(vararg classes: KClass<*>): KSerializer<Class<*>> {
     val map = HashMap<Class<*>, String>()
     fun rec(clazz: Class<*>) {
       for (declaredMethod in clazz.declaredMethods) {

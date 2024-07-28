@@ -83,7 +83,7 @@ class UserCode {
       val disposableCoroutine = DisposableCoroutine()
       runBlocking(disposableCoroutine) {
         disposableCoroutine {
-          (wrapper(json, MapClassSerializerFactory.invoke(UserCode::class), persistedString)) @PersistableContinuation("main") {
+          (wrapper(json, MapClassSerializerFactory(UserCode::class), persistedString)) @PersistableContinuation("main") {
             @PersistencePoint("fooing") val fooing = UserCode().foo()
             @PersistencePoint("done") val done = persist()
             println("done")
