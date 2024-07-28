@@ -19,19 +19,19 @@ public class PersistingWrapper {
                     @NotNull Function1<? super Continuation<? super T>, ?> function1,
                     @NotNull Continuation<? super T> continuation
             ) {
-                var javaCoroutineSerializer = new JavaCoroutineSerializer(stringFormat, classSerializer);
+                var coroutineSerializer = new JavaCoroutineSerializer(stringFormat, classSerializer);
                 class PersistedContinuation implements Continuation<T>, CoroutineStackFrame {
                     final CoroutineContext coroutineContext = new Persistor() {
                         @Override
                         public Object persist(@NotNull Continuation<? super Unit> $completion) {
                             persistedString.setPersisted(((String) serializer.invoke(
-                                    (Continuation<? super String>) $completion
+                                    (Continuation<String>) (Continuation<?>) $completion
                             )), $completion);
                             return Unit.INSTANCE;
                         }
                     }.plus(continuation.getContext());
-                    Function1<? super Continuation<? super String>, ?> serializer = javaCoroutineSerializer.serializer(
-                            (Continuation<? super Function1<? super Continuation<? super String>, ?>>) (Continuation<?>) this
+                    final Function1<? super Continuation<String>, ?> serializer = coroutineSerializer.serializer(
+                            (Continuation<Function1<? super Continuation<? super String>, ?>>) (Continuation<?>) this
                     );
 
                     @NotNull
@@ -59,7 +59,7 @@ public class PersistingWrapper {
                 }
                 var persistedContinuation = new PersistedContinuation();
                 var persisted = (String) persistedString.getPersisted((Continuation<? super String>) continuation);
-                return persisted != null ? javaCoroutineSerializer.deserialize(
+                return persisted != null ? coroutineSerializer.deserialize(
                         persisted,
                         (Continuation<? super Unit>) (Continuation<?>) persistedContinuation
                 ) : function1.invoke(persistedContinuation);
